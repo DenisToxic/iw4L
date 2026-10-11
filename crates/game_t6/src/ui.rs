@@ -26,6 +26,7 @@ pub struct Changes {
 pub struct State {
     pub horizontal: Axis,
     pub vertical: Axis,
+    pub resolved_rectangle: [f32; 4],
     pub color: [f32; 3],
     pub opacity: f32,
     pub zoom: f32,
@@ -49,6 +50,7 @@ impl Default for Element {
             current: State {
                 horizontal: Axis::default(),
                 vertical: Axis::default(),
+                resolved_rectangle: [0.0; 4],
                 color: [1.0; 3],
                 opacity: 1.0,
                 zoom: 0.0,
