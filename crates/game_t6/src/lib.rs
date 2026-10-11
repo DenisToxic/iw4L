@@ -89,7 +89,7 @@ fn own_zombies(
     };
     let map = format!("maps/mp/{}", request.map);
     // The scripts the engine loads itself, then the gametype's and the map's.
-    let roots = vec![
+    let roots = [
         "codescripts/delete".to_owned(),
         "codescripts/struct".to_owned(),
         "maps/mp/gametypes_zm/_callbacksetup".to_owned(),
@@ -100,7 +100,10 @@ fn own_zombies(
         "maps/mp/zombies/_zm".to_owned(),
         format!("maps/mp/gametypes_zm/{}", start.gametype),
         map,
-    ];
+    ]
+    .into_iter()
+    .chain(startup::actor_scripts(request.entities))
+    .collect::<Vec<_>>();
     let read = |name: &str| {
         sources.read_module(name).ok().map(|bytes| gsc_t6::Source {
             name: name.to_owned(),
