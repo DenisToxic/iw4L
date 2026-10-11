@@ -37,6 +37,7 @@ impl game_api::GameScripts for Iw4 {
 const MODE: ModeRules = ModeRules {
     play_starts_on: "prematch_over",
     every_player_downs: Rule::Known(false),
+    downed: game_api::DownedRules::BRIEFLY_IMMUNE,
     movement: Rule::Known(game_api::MovementRules::Simulation),
     weapons: Rule::Known(WeaponRules::Simulation),
     spawn_at_default_health: false,

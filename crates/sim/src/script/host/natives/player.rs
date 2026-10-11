@@ -753,7 +753,11 @@ fn register_death(registry: &mut NativeRegistry) {
         match finish {
             script_player::Finish::Hurt => {}
             script_player::Finish::LastStand => {
-                slot(world, client)?.last_stand_until_ms = Some(now + 500);
+                let immune_ms =
+                    script_player::downed_rules(&FrameWorld::from_world(world)).immune_ms;
+                if immune_ms > 0 {
+                    slot(world, client)?.last_stand_until_ms = Some(now + immune_ms);
+                }
                 super::super::players::owe(world, client, super::super::players::LAST_STAND, owed())
             }
             script_player::Finish::Killed => {
@@ -770,6 +774,12 @@ fn register_death(registry: &mut NativeRegistry) {
     });
     registry.register(Method, "laststandrevive", revive_from_last_stand);
     registry.register(Method, "reviveplayer", revive_from_last_stand);
+    registry.register(Method, "undolaststand", |world, receiver, _| {
+        let id = client_of(world, receiver)?;
+        slot(world, id.0)?.last_stand_until_ms = None;
+        script_player::undo_last_stand(&mut FrameWorld::from_world(world), id);
+        Ok(Value::Undefined)
+    });
     registry.register(
         crate::script::Namespace::Function,
         "obituary",
