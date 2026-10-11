@@ -1625,8 +1625,55 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         (Method, "settext"),
         (Method, "destroy"),
         (Function, "playfxontag"),
+        // The player's weapons and movement: IW4L's, as Black Ops 2's own
+        // movement is not yet read (`docs/fidelity/t6.md`).
+        (Method, "spawn"),
+        (Method, "enableweapons"),
+        (Method, "disableweapons"),
+        (Method, "detachall"),
+        (Method, "setviewmodel"),
+        (Method, "setmovespeedscale"),
+        (Method, "giveweapon"),
+        (Method, "givestartammo"),
+        (Method, "givemaxammo"),
+        (Method, "switchtoweapon"),
+        (Method, "setmaxhealth"),
+        (Method, "hasweapon"),
+        (Method, "setweaponammoclip"),
+        (Method, "setweaponammostock"),
+        (Method, "getweaponammoclip"),
+        (Method, "getweaponammostock"),
+        (Method, "setactionslot"),
+        (Method, "hasperk"),
+        (Method, "setperk"),
+        (Method, "unsetperk"),
+        (Method, "getweaponslistprimaries"),
+        (Method, "getweaponslist"),
+        (Method, "takeweapon"),
+        (Method, "takeallweapons"),
+        (Method, "getcurrentweapon"),
+        (Method, "isonground"),
+        (Function, "bullettrace"),
     ] {
         if let Some(native) = shared.get(namespace, name) {
+            registry.register(namespace, name, native);
+        }
+    }
+    // Black Ops' own player builtins of the same name.
+    let black_ops = NativeRegistry::engine_services().with_black_ops();
+    for (namespace, name) in [
+        (Method, "stopburning"),
+        (Method, "setsprintduration"),
+        (Method, "setsprintcooldown"),
+        (Method, "playerknockback"),
+        (Method, "cameraactivate"),
+        (Method, "setblur"),
+        (Method, "isinvehicle"),
+        (Method, "isthrowinggrenade"),
+        (Method, "setinvisibletoplayer"),
+        (Method, "setvisibletoplayer"),
+    ] {
+        if let Some(native) = black_ops.get(namespace, name) {
             registry.register(namespace, name, native);
         }
     }
