@@ -155,6 +155,8 @@ pub struct ZoneScripts {
     /// Config raw files (`….cfg`) and their text.
     pub configs: Vec<(String, String)>,
     pub tables: Vec<ZoneTable>,
+    /// Layouts of bit-packed buffers (a player's stats), by name.
+    pub layouts: Vec<BitLayout>,
     pub report: Vec<String>,
 }
 
@@ -165,6 +167,39 @@ pub struct ZoneTable {
     pub columns: usize,
     pub rows: usize,
     pub cells: Vec<String>,
+}
+
+/// The layout of a bit-packed buffer: structs of members at bit offsets; the
+/// first struct is the root.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BitLayout {
+    pub name: String,
+    /// The buffer's size in bits.
+    pub bits: u32,
+    pub structs: Vec<BitStruct>,
+    /// Each enum's names, in order.
+    pub enums: Vec<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BitStruct {
+    pub name: String,
+    pub members: Vec<BitMember>,
+}
+
+/// A member: its size in bits (all of an array), its offset in bits, the
+/// game's type number, the struct it holds, the fraction bits of a fixed
+/// point number, its array length and the enum that names its indices.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BitMember {
+    pub name: String,
+    pub bits: u32,
+    pub offset: u32,
+    pub kind: u32,
+    pub external: i32,
+    pub range: u32,
+    pub array_size: i32,
+    pub enum_index: i32,
 }
 
 /// Where a game whose zones `asset_transport` opens itself keeps the compiled

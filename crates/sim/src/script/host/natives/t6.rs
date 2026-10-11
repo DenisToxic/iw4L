@@ -1134,7 +1134,7 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     });
 
     // Living actors whose team is one of those named; none names every team
-    // but the free one.
+    // but the free one. Dogs are left out.
     registry.register(Function, "getaiarray", |world, _, args| {
         let mut mask = 0u32;
         for index in 0..args.len() {
@@ -1146,30 +1146,32 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         if mask == 0 {
             mask = 0x1fe;
         }
-        let actors: Vec<u64> = world
-            .resource::<RoundScript>()
-            .entities
-            .iter()
-            .filter(|(_, entity)| entity.kind == EntityKind::Actor)
-            .map(|(id, _)| *id)
-            .collect();
-        let mut listed = Vec::new();
-        for id in actors {
-            let mut runtime = world.resource_mut::<RoundScript>();
-            let alive = match runtime.object_field(id, "health") {
-                Value::Int(n) => n > 0,
-                Value::Float(f) => f > 0.0,
-                _ => false,
-            };
-            let team = match runtime.object_field(id, "team") {
-                Value::String(name) => team(&[Value::String(name)], 0).unwrap_or(0),
-                _ => 0,
-            };
-            if alive && mask & (1 << team) != 0 {
-                listed.push(Value::Object(id));
+        let actors = living_actors(world, mask, |species| species != 0 && species != 3);
+        new_array(world, actors)
+    });
+    // Living actors of a team (or all) and a species (or all).
+    registry.register(Function, "getaispeciesarray", |world, _, args| {
+        let mask = match args.first() {
+            None => 0x1fe,
+            Some(Value::String(name)) if name.as_bytes() == b"all" => 0x1fe,
+            Some(_) => 1 << team(args, 0)?,
+        };
+        let species = if args.len() < 2 {
+            4
+        } else {
+            let name = string(args, 1)?;
+            match name.as_str() {
+                "all" => 4,
+                _ => SPECIES
+                    .iter()
+                    .position(|known| *known == name)
+                    .ok_or_else(|| {
+                        format!("unknown species '{name}' (should be human, dog, bigdog or all)")
+                    })?,
             }
-        }
-        new_array(world, listed)
+        };
+        let actors = living_actors(world, mask, |own| species == 4 || own == species);
+        new_array(world, actors)
     });
     // Path changes wait for Black Ops 2's path finding (`docs/fidelity/t6.md`).
     registry.register(Method, "disconnectpaths", |world, receiver, _| {
@@ -1198,6 +1200,272 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             .get_resource_or_insert_with(EntityFlags::default)
             .weapon_hide_tags
             .insert(id, name);
+        Ok(Value::Undefined)
+    });
+
+    // Player settings the client reads; each is a client dvar by number.
+    registry.register(
+        Method,
+        "setclientaimlockonpitchstrength",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 0),
+    );
+    registry.register(
+        Method,
+        "setclientammocounterhide",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 1),
+    );
+    registry.register(
+        Method,
+        "setclientcgobjectivetext",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 2),
+    );
+    registry.register(Method, "setclientcompass", |world, receiver, args| {
+        set_client_dvar(world, receiver, args, 3)
+    });
+    registry.register(Method, "setclienthudhardcore", |world, receiver, args| {
+        set_client_dvar(world, receiver, args, 6)
+    });
+    registry.register(
+        Method,
+        "setclientplayersprinttime",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 7),
+    );
+    registry.register(
+        Method,
+        "setclientminiscoreboardhide",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 8),
+    );
+    registry.register(Method, "setclientnumlives", |world, receiver, args| {
+        set_client_dvar(world, receiver, args, 9)
+    });
+    registry.register(
+        Method,
+        "setclientplayerpushamount",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 10),
+    );
+    registry.register(
+        Method,
+        "setclientscriptmainmenu",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 12),
+    );
+    registry.register(
+        Method,
+        "setclientthirdpersonangle",
+        |world, receiver, args| set_client_dvar(world, receiver, args, 14),
+    );
+    registry.register(Method, "setclientthirdperson", |world, receiver, args| {
+        let client = client_of(world, receiver)?;
+        let on = int(args, 0)? != 0;
+        player_state(world, client).third_person = on;
+        Ok(Value::Undefined)
+    });
+    registry.register(
+        Method,
+        "setclientuivisibilityflag",
+        |world, receiver, args| {
+            let client = client_of(world, receiver)?;
+            let name = string(args, 0)?;
+            let on = int(args, 1)? != 0;
+            let bit = [
+                "hud_visible",
+                "g_compassShowEnemies",
+                "radar_client",
+                "killcam_nemesis",
+            ]
+            .iter()
+            .position(|flag| flag.eq_ignore_ascii_case(&name))
+            .ok_or_else(|| {
+                format!(
+                    "PlayerCmd_SetClientFlag: Couldn't find a matching bit for flag name : {name} "
+                )
+            })?;
+            let flags = &mut player_state(world, client).ui_visibility;
+            if on {
+                *flags |= 1 << bit;
+            } else {
+                *flags &= !(1 << bit);
+            }
+            Ok(Value::Undefined)
+        },
+    );
+    registry.register(Method, "setplayercurrentstreak", |world, receiver, args| {
+        let client = client_of(world, receiver)?;
+        player_state(world, client).current_streak = int(args, 0)?;
+        Ok(Value::Undefined)
+    });
+    registry.register(Method, "allowspectateteam", |world, receiver, args| {
+        let client = client_of(world, receiver)?;
+        let name = string(args, 0)?;
+        let bit = match name.as_str() {
+            "none" => 1,
+            "freelook" => 0x400,
+            "localplayers" => 0x800,
+            _ => 1 << team(args, 0)?,
+        };
+        let allow = int(args, 1)? != 0;
+        let mask = &mut player_state(world, client).spectate_denied;
+        if allow {
+            *mask &= !bit;
+        } else {
+            *mask |= bit;
+        }
+        Ok(Value::Undefined)
+    });
+    registry.register(Method, "enableusability", |world, receiver, _| {
+        let client = client_of(world, receiver)?;
+        player_state(world, client).usability_disabled = false;
+        Ok(Value::Undefined)
+    });
+    registry.register(Method, "disabledeathstreak", |world, receiver, _| {
+        client_of(world, receiver)?;
+        Ok(Value::Undefined)
+    });
+    registry.register(Method, "getentitynumber", |world, receiver, _| {
+        let id = super::engine::entity_id(world, receiver)?;
+        Ok(Value::Int(
+            world.resource::<RoundScript>().entities[&id].number,
+        ))
+    });
+    // The owner hosts the solo match on this machine.
+    registry.register(Method, "ishost", |world, receiver, _| {
+        client_of(world, receiver)?;
+        Ok(Value::Int(1))
+    });
+    registry.register(Method, "islocaltohost", |world, receiver, _| {
+        client_of(world, receiver)?;
+        Ok(Value::Int(1))
+    });
+    registry.register(Method, "issplitscreen", |world, receiver, _| {
+        client_of(world, receiver)?;
+        Ok(Value::Int(0))
+    });
+    registry.register(Function, "getgametypeenumfromname", |_, _, args| {
+        let name = string(args, 0)?;
+        int(args, 1)?;
+        let index = ["zgrief", "zclassic", "zstandard", "zcleansed"]
+            .iter()
+            .position(|known| known.eq_ignore_ascii_case(&name))
+            .ok_or_else(|| {
+                format!("GetGameTypeEnumFromName: Invalid gametype parameter: '{name}' supplied to GetGameTypeEnumFromName")
+            })?;
+        Ok(Value::Int(index as i32))
+    });
+    registry.register(Function, "setinitialplayersconnected", |world, _, _| {
+        world.insert_resource(InitialPlayersConnected);
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "aretexturesloaded", |_, _, _| Ok(Value::Int(1)));
+    registry.register(Method, "usetriggerrequirelookat", |world, receiver, _| {
+        let id = super::engine::entity_id(world, receiver)?;
+        let classname = world.resource::<RoundScript>().entities[&id]
+            .classname
+            .clone();
+        if !matches!(
+            &*classname,
+            "trigger_use" | "trigger_radius_use" | "trigger_box"
+        ) {
+            return Err(
+                "The UseTriggerRequireLookAt command only works on trigger_use entities.\n".into(),
+            );
+        }
+        world
+            .get_resource_or_insert_with(EntityFlags::default)
+            .require_look_at
+            .insert(id);
+        Ok(Value::Undefined)
+    });
+    // Profiling, performance markers, logs, the matchmaking backend's game
+    // history and stats upload are outside the match.
+    registry.register(Function, "profilelog_begintiming", |_, _, _| {
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "profilelog_endtiming", |_, _, _| {
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "pixbeginevent", |_, _, _| Ok(Value::Undefined));
+    registry.register(Function, "pixendevent", |_, _, _| Ok(Value::Undefined));
+    registry.register(Function, "pixmarker", |_, _, _| Ok(Value::Undefined));
+    registry.register(Function, "logprint", |_, _, _| Ok(Value::Undefined));
+    registry.register(Function, "bbprint", |_, _, _| Ok(Value::Undefined));
+    registry.register(Function, "resettimeout", |_, _, _| Ok(Value::Undefined));
+    registry.register(Function, "uploadstats", |_, _, _| Ok(Value::Undefined));
+    registry.register(Method, "gamehistorystartmatch", |world, receiver, _| {
+        client_of(world, receiver)?;
+        Ok(Value::Undefined)
+    });
+
+    // A player's stats, in the zombies stats layout; a new profile's are all
+    // zero (`docs/fidelity/t6.md`).
+    registry.register(Method, "getdstat", |world, receiver, args| {
+        let client = client_of(world, receiver)
+            .map_err(|_| String::from("getdstat: entity must be a player entity"))?;
+        let (layout, at) =
+            stat_path(world, args, args.len())?.ok_or("getdstat: can't find stat path")?;
+        let stats = player_stats(world, client, &layout);
+        let raw = read_bits(stats, at.offset, at.bits);
+        Ok(match at.kind {
+            0..=3 => Value::Int(raw as u32 as i32),
+            4 => Value::string(&raw.to_string()),
+            5 | 6 => Value::string(&format!("{:.6}", f32::from_bits(raw as u32))),
+            7 => {
+                let bytes: Vec<u8> = (0..at.bits / 8)
+                    .map(|i| read_bits(stats, at.offset + i * 8, 8) as u8)
+                    .take_while(|&b| b != 0)
+                    .collect();
+                Value::string(&String::from_utf8_lossy(&bytes))
+            }
+            _ => return Err("getdstat: stat type undefined".into()),
+        })
+    });
+    registry.register(Method, "setdstat", |world, receiver, args| {
+        let client = client_of(world, receiver)
+            .map_err(|_| String::from("setdstat: entity must be a player entity"))?;
+        let path = args.len().saturating_sub(1);
+        let Some((layout, at)) = stat_path(world, args, path)? else {
+            return Ok(Value::Undefined);
+        };
+        let value = match (arg(args, path)?, at.kind) {
+            (Value::Int(n), 0..=3) => *n as u32 as u64,
+            (Value::Int(n), 4) => *n as i64 as u64,
+            (Value::Float(f), 5 | 6) => u64::from(f.to_bits()),
+            (Value::String(text), 4) => text.parse::<u64>().unwrap_or(0),
+            (Value::String(text), 7) => {
+                let stats = player_stats(world, client, &layout);
+                let bytes = text.as_bytes();
+                for i in 0..at.bits / 8 {
+                    let byte = bytes.get(i as usize).copied().unwrap_or(0);
+                    write_bits(stats, at.offset + i * 8, 8, u64::from(byte));
+                }
+                return Ok(Value::Undefined);
+            }
+            _ => return Err("setdstat: the value's type does not match the stat's".into()),
+        };
+        write_bits(
+            player_stats(world, client, &layout),
+            at.offset,
+            at.bits,
+            value,
+        );
+        Ok(Value::Undefined)
+    });
+    registry.register(Method, "adddstat", |world, receiver, args| {
+        let client = client_of(world, receiver)
+            .map_err(|_| String::from("AddDStat: entity must be a player entity"))?;
+        let path = args.len().saturating_sub(1);
+        let Some((layout, at)) = stat_path(world, args, path)? else {
+            return Ok(Value::Undefined);
+        };
+        let delta = int(args, path)?;
+        let stats = player_stats(world, client, &layout);
+        let value = read_bits(stats, at.offset, at.bits) as i64 + i64::from(delta);
+        write_bits(stats, at.offset, at.bits, value as u64);
+        Ok(Value::Undefined)
+    });
+    // Counts for the online match record only.
+    registry.register(Method, "incrementplayerstat", |world, receiver, args| {
+        client_of(world, receiver)?;
+        string(args, 0)?;
+        int(args, 1)?;
         Ok(Value::Undefined)
     });
 
@@ -1231,6 +1499,14 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         (Method, "usebuttonpressed"),
         (Method, "getplayerangles"),
         (Function, "isalive"),
+        (Function, "newclienthudelem"),
+        (Method, "setdepthoffield"),
+        (Method, "stopshellshock"),
+        (Method, "stoprumble"),
+        (Method, "closemenu"),
+        (Method, "closeingamemenu"),
+        (Function, "iprintln"),
+        (Method, "getguid"),
     ] {
         if let Some(native) = shared.get(namespace, name) {
             registry.register(namespace, name, native);
@@ -1353,6 +1629,252 @@ fn absolute_bounds(world: &mut World, id: u64) -> ([f32; 3], [f32; 3]) {
     (low.map(|v| v - 1.0), high.map(|v| v + 1.0))
 }
 
+/// The layout of a zombies player's stats.
+const STATS_LAYOUT: &str = "ddl_zm/stats.ddl";
+
+/// Where a stat path ends: its bits and the member's type.
+struct StatAt {
+    offset: u32,
+    bits: u32,
+    kind: u32,
+}
+
+/// Each player's stats buffer, by layout.
+#[derive(Resource, Default)]
+struct PlayerStats(BTreeMap<(u32, String), Vec<u8>>);
+
+/// The first `count` arguments as a path into the stats layout: member
+/// names, and array indices as numbers or the names of the array's enum.
+/// `None` when a step does not resolve (the engine prints and goes on).
+fn stat_path(
+    world: &World,
+    args: &[Value],
+    count: usize,
+) -> Result<Option<(String, StatAt)>, String> {
+    if count > 8 {
+        return Err("get/setdstat: path is too deep.".into());
+    }
+    let layout = world
+        .resource::<RoundScript>()
+        .restart
+        .as_ref()
+        .and_then(|plan| plan.layouts.get(STATS_LAYOUT).cloned())
+        .ok_or("the zombies stats layout is not in the zones")?;
+    let Some(root) = layout.structs.first() else {
+        return Ok(None);
+    };
+    let mut offset = 0u32;
+    let mut member: Option<&asset_core::BitMember> = None;
+    let mut indexed = false;
+    for index in 0..count {
+        if !matches!(arg(args, index)?, Value::String(_) | Value::Int(_)) {
+            return Err("get/setdstat: Expected strings or integers only.".into());
+        }
+        let name = string(args, index)?.to_ascii_lowercase();
+        let find = |s| member_named(s, &name);
+        match member {
+            None => {
+                let Some(found) = find(root) else {
+                    return Ok(None);
+                };
+                offset = found.offset;
+                member = Some(found);
+                indexed = false;
+            }
+            Some(array) if array.array_size > 1 && !indexed => {
+                let position = if array.enum_index < 0 {
+                    atoi(&name)
+                } else {
+                    let Some(names) = layout.enums.get(array.enum_index as usize) else {
+                        return Ok(None);
+                    };
+                    match names.iter().position(|n| n.eq_ignore_ascii_case(&name)) {
+                        Some(position) => position as i32,
+                        None => return Ok(None),
+                    }
+                };
+                if position < 0 || position >= array.array_size {
+                    return Ok(None);
+                }
+                offset += array.bits / array.array_size as u32 * position as u32;
+                indexed = true;
+            }
+            Some(holder) if matches!(holder.kind, 8 | 9) => {
+                let Some(found) = layout.structs.get(holder.external as usize).and_then(find)
+                else {
+                    return Ok(None);
+                };
+                offset += found.offset;
+                member = Some(found);
+                indexed = false;
+            }
+            Some(_) => return Ok(None),
+        }
+    }
+    let Some(member) = member else {
+        return Ok(None);
+    };
+    let bits = if member.array_size > 1 && indexed {
+        member.bits / member.array_size as u32
+    } else {
+        member.bits
+    };
+    Ok(Some((
+        layout.name.clone(),
+        StatAt {
+            offset,
+            bits,
+            kind: member.kind,
+        },
+    )))
+}
+
+fn member_named<'a>(s: &'a asset_core::BitStruct, name: &str) -> Option<&'a asset_core::BitMember> {
+    s.members.iter().find(|m| m.name.eq_ignore_ascii_case(name))
+}
+
+fn player_stats<'w>(world: &'w mut World, client: u32, layout: &str) -> &'w mut Vec<u8> {
+    let bits = world
+        .resource::<RoundScript>()
+        .restart
+        .as_ref()
+        .and_then(|plan| plan.layouts.get(layout).map(|l| l.bits))
+        .unwrap_or(0);
+    world
+        .get_resource_or_insert_with(PlayerStats::default)
+        .into_inner()
+        .0
+        .entry((client, layout.to_owned()))
+        .or_insert_with(|| vec![0; bits.div_ceil(8) as usize])
+}
+
+/// Bits from the least significant up, at most 64.
+fn read_bits(buffer: &[u8], offset: u32, bits: u32) -> u64 {
+    (0..bits.min(64)).fold(0u64, |value, i| {
+        let at = offset + i;
+        let bit = buffer
+            .get((at / 8) as usize)
+            .map_or(0, |byte| (byte >> (at % 8)) & 1);
+        value | (u64::from(bit) << i)
+    })
+}
+
+fn write_bits(buffer: &mut [u8], offset: u32, bits: u32, value: u64) {
+    for i in 0..bits.min(64) {
+        let at = offset + i;
+        if let Some(byte) = buffer.get_mut((at / 8) as usize) {
+            let mask = 1 << (at % 8);
+            if value >> i & 1 != 0 {
+                *byte |= mask;
+            } else {
+                *byte &= !mask;
+            }
+        }
+    }
+}
+
+/// AI species by number.
+const SPECIES: [&str; 4] = ["dog", "bigdog", "zombie", "zombie_dog"];
+
+/// Each actor's species once its spawner gave it one; an actor without one
+/// is taken as a zombie (`docs/fidelity/t6.md`).
+#[derive(Resource, Default)]
+struct ActorSpecies(BTreeMap<u64, usize>);
+
+/// Living actors on a team of `mask` whose species `keep` admits, in spawn
+/// order.
+fn living_actors(world: &mut World, mask: u32, keep: impl Fn(usize) -> bool) -> Vec<Value> {
+    let actors: Vec<u64> = world
+        .resource::<RoundScript>()
+        .entities
+        .iter()
+        .filter(|(_, entity)| entity.kind == EntityKind::Actor)
+        .map(|(id, _)| *id)
+        .collect();
+    let mut listed = Vec::new();
+    for id in actors {
+        let species = world
+            .get_resource::<ActorSpecies>()
+            .and_then(|known| known.0.get(&id).copied())
+            .unwrap_or(2);
+        let mut runtime = world.resource_mut::<RoundScript>();
+        let alive = match runtime.object_field(id, "health") {
+            Value::Int(n) => n > 0,
+            Value::Float(f) => f > 0.0,
+            _ => false,
+        };
+        let team = match runtime.object_field(id, "team") {
+            Value::String(name) => team(&[Value::String(name)], 0).unwrap_or(0),
+            _ => 0,
+        };
+        if alive && mask & (1 << team) != 0 && keep(species) {
+            listed.push(Value::Object(id));
+        }
+    }
+    listed
+}
+
+/// Player state the engine keeps per client that IW4L's player does not.
+#[derive(Default)]
+struct PlayerState {
+    client_dvars: BTreeMap<u8, String>,
+    third_person: bool,
+    ui_visibility: u32,
+    current_streak: i32,
+    spectate_denied: u32,
+    usability_disabled: bool,
+}
+
+#[derive(Resource, Default)]
+struct Players(BTreeMap<u32, PlayerState>);
+
+/// `setinitialplayersconnected` was called.
+#[derive(Resource)]
+struct InitialPlayersConnected;
+
+/// A player method's receiver as its client number.
+fn client_of(world: &World, receiver: &Value) -> Result<u32, String> {
+    let Value::Object(id) = receiver else {
+        return Err("not an entity".into());
+    };
+    let runtime = world.resource::<RoundScript>();
+    runtime.player_client(*id).ok_or_else(|| {
+        runtime
+            .entities
+            .get(id)
+            .map_or("not an entity".to_owned(), |entity| {
+                format!("entity {} is not a player", entity.number)
+            })
+    })
+}
+
+fn player_state(world: &mut World, client: u32) -> &mut PlayerState {
+    world
+        .get_resource_or_insert_with(Players::default)
+        .into_inner()
+        .0
+        .entry(client)
+        .or_default()
+}
+
+/// A client dvar: a localized string or any value as text.
+fn set_client_dvar(
+    world: &mut World,
+    receiver: &Value,
+    args: &[Value],
+    index: u8,
+) -> Result<Value, String> {
+    let client = client_of(world, receiver)?;
+    let value = match arg(args, 0)? {
+        Value::LocalizedString(text) => text.to_string(),
+        _ => string(args, 0)?,
+    };
+    player_state(world, client)
+        .client_dvars
+        .insert(index, value);
+    Ok(Value::Undefined)
+}
+
 /// The pools a client field belongs to.
 const CLIENT_FIELD_POOLS: [&str; 11] = [
     "world",
@@ -1452,6 +1974,7 @@ struct EntityFlags {
     trigger_team: BTreeMap<u64, usize>,
     disconnects_paths: std::collections::BTreeSet<u64>,
     weapon_hide_tags: BTreeMap<u64, String>,
+    require_look_at: std::collections::BTreeSet<u64>,
 }
 
 /// The tables a lookup can name by number.

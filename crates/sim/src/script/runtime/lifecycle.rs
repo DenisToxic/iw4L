@@ -59,6 +59,7 @@ pub(crate) fn install(
         tables: Arc::new(level.tables),
         keys: Arc::new(level.keys),
         entity_fields: Arc::new(level.entity_fields),
+        layouts: level.layouts,
         entries: Vec::new(),
         schemas: level.schemas,
         player_data_defaults: level.player_data_defaults.map(Arc::new),

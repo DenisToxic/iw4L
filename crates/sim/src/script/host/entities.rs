@@ -26,6 +26,8 @@ pub struct LevelData {
     /// The keys the engine reads into an entity itself; when given, other
     /// keys not in `keys` are dropped, and a struct keeps only `keys`.
     pub entity_fields: Option<BTreeMap<String, KeyType>>,
+    /// Layouts of bit-packed buffers (a player's stats), by name.
+    pub layouts: BTreeMap<String, Arc<asset_core::BitLayout>>,
     pub schemas: BTreeMap<String, Arc<structured_data_iw4::DefinitionSet>>,
     pub player_data_defaults: Option<crate::PlayerDataDefaults>,
 }

@@ -1261,6 +1261,7 @@ fn preflight_match_install(
         entities: sim::script::parse_entity_string(sources.0.entities().unwrap_or("")),
         keys,
         entity_fields: None,
+        layouts: sources.0.layouts().clone(),
         tables: sources
             .0
             .tables()

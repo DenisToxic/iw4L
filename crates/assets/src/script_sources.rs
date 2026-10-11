@@ -7,6 +7,7 @@ pub struct ScriptSources {
     modules: BTreeMap<String, Vec<u8>>,
     tables: BTreeMap<String, ScriptTable>,
     schemas: BTreeMap<String, std::sync::Arc<structured_data_iw4::DefinitionSet>>,
+    layouts: BTreeMap<String, std::sync::Arc<asset_core::BitLayout>>,
     entities: Option<String>,
     configs: BTreeMap<String, String>,
 }
@@ -66,6 +67,16 @@ impl ScriptSources {
         self.modules.extend(other.modules.clone());
         self.tables.extend(other.tables.clone());
         self.configs.extend(other.configs.clone());
+        self.layouts.extend(other.layouts.clone());
+    }
+
+    pub(crate) fn capture_layout(&mut self, layout: asset_core::BitLayout) {
+        self.layouts
+            .insert(normalize(&layout.name), std::sync::Arc::new(layout));
+    }
+
+    pub fn layouts(&self) -> &BTreeMap<String, std::sync::Arc<asset_core::BitLayout>> {
+        &self.layouts
     }
 
     pub(crate) fn capture_zone_table(&mut self, table: asset_core::ZoneTable) {
@@ -249,6 +260,7 @@ impl ScriptSources {
         self.modules.extend(other.modules);
         self.tables.extend(other.tables);
         self.schemas.extend(other.schemas);
+        self.layouts.extend(other.layouts);
         self.configs.extend(other.configs);
         if other.entities.is_some() {
             self.entities = other.entities;
