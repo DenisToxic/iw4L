@@ -36,9 +36,12 @@ pub(crate) fn update(
     time: Res<Time>,
     mut memory: Local<HintMemory>,
     view: Option<Res<frame::ViewSubject>>,
+    mode: Option<Res<game_api::ModeRules>>,
 ) {
     pass.use_hint = TessJob::Hide;
+    // A game whose own HUD menus draw draws its hint there.
     if !surface.is_ready()
+        || mode.as_ref().is_some_and(|mode| mode.hud.game_hud_menus)
         || input.script_menu_open
         || view.as_ref().is_some_and(|v| v.in_killcam())
     {

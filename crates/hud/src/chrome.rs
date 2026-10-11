@@ -613,6 +613,34 @@ pub(crate) fn push_owner_text(
     Ok(())
 }
 
+/// An owner draw's text at the place `place` gives from the text's measured
+/// width and line height, in the item's font, scale and alignment.
+pub(crate) fn push_owner_text_at(
+    args: &OwnerDrawArgs<'_>,
+    text: &str,
+    color: [f32; 4],
+    place: impl FnOnce(f32, f32) -> (f32, f32),
+    frame: &mut ChromeFrame,
+) -> Result<(), ChromeGapKind> {
+    let font_name = args
+        .assets
+        .font_name(
+            args.item.font_enum,
+            args.surface.scale_virtual_to_real()[1],
+            args.item.text_scale,
+        )
+        .ok_or(ChromeGapKind::AssetFont)?;
+    let Some(font) = args.assets.catalog.and_then(|c| c.font(font_name)) else {
+        return Err(ChromeGapKind::AssetFont);
+    };
+    let layout = args.assets.layout().ok_or(ChromeGapKind::Layout)?;
+    let width = layout_text_width(layout, font, text, args.item.text_scale);
+    let height = layout.text_height(font.pixel_height, args.item.text_scale);
+    let (x, y) = place(width, height);
+    push_owner_text_run(args, font_name, font, text, color, x, y, frame);
+    Ok(())
+}
+
 pub(crate) fn push_owner_text_right_of_rect(
     args: &OwnerDrawArgs<'_>,
     text: &str,
