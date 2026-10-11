@@ -142,6 +142,9 @@ pub(crate) fn apply_script_blasts(world: &mut World, tick: crate::Tick) {
     }
     for blast in blasts {
         let mut frame = FrameWorld::from_world(world);
+        if crate::game_fire::script_blast(&mut frame, tick, &blast) {
+            continue;
+        }
         crate::damage::apply_script_blast(&mut frame, tick, &blast);
         for (target, mid, dist) in radius_targets(world, blast.origin, blast.radius) {
             if Some(target) == blast.inflictor {
@@ -447,6 +450,15 @@ pub(crate) struct ShotTarget {
     pub ai_type: Option<&'static str>,
     pub ignore_locational_damage: bool,
     pub allow_death: bool,
+    pub origin: [f32; 3],
+    pub angles: [f32; 3],
+    pub script_model: bool,
+    /// An actor's `tag_eye`.
+    pub eye: Option<[f32; 3]>,
+    /// A brush model's bounds: in the world, and in its own space.
+    pub brush: Option<(([f32; 3], [f32; 3]), ([f32; 3], [f32; 3]))>,
+    pub contents: u32,
+    pub destructible: bool,
 }
 
 pub(crate) fn shot_target(world: &mut World, target: ScriptModelId) -> Option<ShotTarget> {
@@ -481,6 +493,58 @@ pub(crate) fn shot_target(world: &mut World, target: ScriptModelId) -> Option<Sh
         int(runtime.object_field(object, "ignorelocationaldamage")).is_some_and(|n| n != 0);
     // Black Ops spawns its actors with allowdeath off.
     let allow_death = int(runtime.object_field(object, "allowdeath")).is_some_and(|n| n != 0);
+    let vector = |value: Value| match value {
+        Value::Vector(v) => v,
+        _ => [0.0; 3],
+    };
+    let origin = vector(runtime.object_field(object, "origin"));
+    let angles = vector(runtime.object_field(object, "angles"));
+    let script_model = matches!(
+        runtime.object_field(object, "classname"),
+        Value::String(name) if name.as_bytes() == b"script_model"
+    );
+    drop(runtime);
+    let eye = if actor {
+        super::presence::tag_world(world, object, "tag_eye").map(|(at, _)| at)
+    } else {
+        None
+    };
+    let frame = FrameWorld::from_world(world);
+    let row = frame
+        .entity_collision_capabilities()
+        .iter()
+        .find(|row| row.owner.script_model() == Some(target));
+    let destructible = row
+        .and_then(|row| row.dobj.as_ref())
+        .is_some_and(|dobj| dobj.t5_destructible.is_some());
+    let (brush, contents) = row
+        .and_then(|row| row.linked_brushes.first())
+        .and_then(|brush| {
+            let model = frame
+                .clip_cmodels()
+                .models
+                .get(brush.cmodel_handle as usize)?;
+            let at = brush.origin;
+            Some((
+                Some((
+                    (
+                        core::array::from_fn(|i| at[i] + model.mins[i]),
+                        core::array::from_fn(|i| at[i] + model.maxs[i]),
+                    ),
+                    (model.mins, model.maxs),
+                )),
+                // A brush model is solid to what its brushes are.
+                frame
+                    .clip_bsp()
+                    .leafbrushes
+                    .iter()
+                    .skip(model.first_brush as usize)
+                    .take(usize::from(model.num_brushes))
+                    .filter_map(|&id| frame.clip_brushes().get(id as usize))
+                    .fold(0, |contents, b| contents | b.contents),
+            ))
+        })
+        .unwrap_or((None, 0));
     Some(ShotTarget {
         actor,
         takes_damage,
@@ -489,6 +553,13 @@ pub(crate) fn shot_target(world: &mut World, target: ScriptModelId) -> Option<Sh
         ai_type,
         ignore_locational_damage,
         allow_death,
+        origin,
+        angles,
+        script_model,
+        eye,
+        brush,
+        contents,
+        destructible,
     })
 }
 
@@ -502,4 +573,23 @@ pub(crate) fn notify_player(world: &mut World, client: u32, name: &str, weapon: 
         .map(|weapon| vec![Value::string(weapon)])
         .unwrap_or_default();
     raise(world, receiver, name, args);
+}
+
+/// Every script entity the match presents, with its origin.
+pub(crate) fn presented_origins(world: &mut World) -> Vec<(ScriptModelId, [f32; 3])> {
+    let Some(mut runtime) = world.get_resource_mut::<RoundScript>() else {
+        return Vec::new();
+    };
+    let presented: Vec<(u64, ScriptModelId)> = runtime
+        .entities
+        .iter()
+        .filter_map(|(object, entity)| Some((*object, entity.presence?)))
+        .collect();
+    presented
+        .into_iter()
+        .map(|(object, id)| match runtime.object_field(object, "origin") {
+            Value::Vector(at) => (id, at),
+            _ => (id, [0.0; 3]),
+        })
+        .collect()
 }

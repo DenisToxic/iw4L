@@ -313,6 +313,16 @@ pub trait PlayerMovement: Sync {
     ) -> Vec<&'static Unknown> {
         Vec::new()
     }
+
+    /// A blast by the game's own rules; `None` when the game has none and
+    /// the match applies its own.
+    fn radius_damage(
+        &self,
+        _blast: &crate::fire::RadiusDamage,
+        _world: &mut dyn crate::fire::FireWorld,
+    ) -> Option<Vec<&'static Unknown>> {
+        None
+    }
 }
 
 /// Whose weapon rules run a match.

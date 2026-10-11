@@ -113,7 +113,7 @@ pub(crate) fn run(
             .iter()
             .any(|signal| matches!(signal, MoveSignal::Event { .. }))
     {
-        let mut around = crate::game_fire::MatchFireWorld::new(world, tick, id);
+        let mut around = crate::game_fire::MatchFireWorld::new(world, tick, Some(id));
         let gaps = movement.server_events(&before, &player, &outcome.signals, &mut around);
         outcome.gaps.extend(gaps);
     }

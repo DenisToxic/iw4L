@@ -28,10 +28,16 @@ pub(crate) struct MatchFireWorld<'w, 'a> {
 }
 
 impl<'w, 'a> MatchFireWorld<'w, 'a> {
-    pub(crate) fn new(world: &'w mut FrameWorld<'a>, tick: Tick, attacker: ClientId) -> Self {
+    /// The match as `attacker` saw it when it fired; as it stands for a
+    /// blast with no shooter.
+    pub(crate) fn new(
+        world: &'w mut FrameWorld<'a>,
+        tick: Tick,
+        attacker: Option<ClientId>,
+    ) -> Self {
         world.record_collision_history(tick, 0, None);
         world.record_entity_collision_history(tick);
-        let query = world.lagcomp_query_for(attacker, tick);
+        let query = world.lagcomp_query_for(attacker.unwrap_or(ClientId(u32::MAX)), tick);
         let shot = world.alloc_shot_id();
         Self {
             content: world.content(),
@@ -213,11 +219,29 @@ impl FireWorld for MatchFireWorld<'_, '_> {
         if let Some(client) = self.client(entity) {
             let meta = self.world.client_meta(client)?;
             let alive = meta.lifecycle == crate::match_state::ClientLifecycle::Alive;
+            let team = team_of(crate::spawn::team_name(meta.client_state_team));
+            let ps = self.world.player(client)?;
+            // A sentient links one unit wider than its bounds.
+            let bounds = self.world.player_area_bounds(client).map(|b| {
+                let (mid, half) = (b.mid(), b.half());
+                (
+                    core::array::from_fn(|i| mid[i] - half[i] - 1.0),
+                    core::array::from_fn(|i| mid[i] + half[i] + 1.0),
+                )
+            });
             return Some(FireEntity {
                 kind: FireEntityKind::Player,
+                origin: ps.origin,
+                angles: ps.viewangles,
+                contents: 0,
+                bounds,
+                model_bounds: None,
+                eye: None,
+                script_model: false,
+                blast_handler: false,
                 takes_damage: alive,
-                health: self.world.player(client).map_or(0, |ps| ps.health),
-                team: team_of(crate::spawn::team_name(meta.client_state_team)),
+                health: ps.health,
+                team,
                 ignore_locational_damage: false,
                 allow_death: true,
                 god: false,
@@ -233,6 +257,14 @@ impl FireWorld for MatchFireWorld<'_, '_> {
             } else {
                 FireEntityKind::Other
             },
+            origin: target.origin,
+            angles: target.angles,
+            contents: target.contents,
+            bounds: target.brush.map(|(world, _)| world),
+            model_bounds: target.brush.map(|(_, local)| local),
+            eye: target.eye,
+            script_model: target.script_model,
+            blast_handler: target.destructible,
             takes_damage: target.takes_damage,
             health: target.health,
             team: team_of(target.team),
@@ -261,9 +293,55 @@ impl FireWorld for MatchFireWorld<'_, '_> {
     }
 
     fn damage(&mut self, damage: &FireDamage) {
+        if let Some(victim) = self.client(damage.target) {
+            let attacker = self.client(damage.attacker);
+            let commit = attacker.and_then(|attacker| {
+                Some(crate::damage::DeathCommit {
+                    victim,
+                    victim_life: self.world.client_meta(victim)?.life_sequence,
+                    attacker,
+                    attacker_life: self.world.client_meta(attacker)?.life_sequence,
+                    source: crate::DamageSource::Shot(self.shot),
+                    pellet: crate::identities::PelletId(0),
+                    weapon: damage.weapon,
+                    amount: damage.amount,
+                    killcam_entity_start_time: 0,
+                    inflictor_origin: Some(damage.point),
+                    hitloc: 0,
+                })
+            });
+            let hit = crate::script_player::Hit {
+                victim,
+                attacker,
+                attacker_object: None,
+                amount: damage.amount,
+                flags: damage.flags,
+                means: damage.means,
+                weapon: damage.weapon,
+                point: damage.point,
+                dir: damage.dir,
+                hitloc: u8::try_from(damage.location).unwrap_or(0),
+                inflictor: None,
+                commit,
+            };
+            crate::script::game_player_damage(self.world.ecs(), self.tick, &hit);
+            return;
+        }
         let Some(target) = self.model(damage.target) else {
             return;
         };
+        if let Some(bone) = damage.bone
+            && crate::t5_destructible::apply_hit(
+                self.world,
+                self.tick,
+                crate::AuthorityModelOwner::ScriptModel(target),
+                bone,
+                damage.amount.max(0) as u32,
+                self.client(damage.attacker),
+            )
+        {
+            return;
+        }
         let attacker = self.client(damage.attacker);
         crate::script::damage_entity(
             self.world.ecs(),
@@ -332,6 +410,87 @@ impl FireWorld for MatchFireWorld<'_, '_> {
         });
     }
 
+    fn entities_in_box(&mut self, mins: [f32; 3], maxs: [f32; 3]) -> Vec<i32> {
+        // Candidates: the game tests each one's own bounds. A body reaches at
+        // most this far beyond its origin.
+        const REACH: f32 = 128.0;
+        let overlaps = |lo: [f32; 3], hi: [f32; 3]| (0..3).all(|i| lo[i] <= maxs[i] && hi[i] >= mins[i]);
+        let mut out = Vec::new();
+        for id in self.world.client_ids_sorted() {
+            let Some(ps) = self.world.player(id) else {
+                continue;
+            };
+            let o = ps.origin;
+            if overlaps(o.map(|c| c - REACH), o.map(|c| c + REACH)) {
+                out.push(id.0 as i32);
+            }
+        }
+        for (id, origin) in crate::script::presented_origins(self.world.ecs()) {
+            let near = overlaps(origin.map(|c| c - REACH), origin.map(|c| c + REACH));
+            let brush = self
+                .world
+                .entity_collision_capabilities()
+                .iter()
+                .find(|row| row.owner.script_model() == Some(id))
+                .and_then(|row| row.linked_brushes.first())
+                .and_then(|brush| {
+                    let model = self
+                        .world
+                        .clip_cmodels()
+                        .models
+                        .get(brush.cmodel_handle as usize)?;
+                    let at = brush.origin;
+                    Some(overlaps(
+                        core::array::from_fn(|i| at[i] + model.mins[i] - model.radius),
+                        core::array::from_fn(|i| at[i] + model.maxs[i] + model.radius),
+                    ))
+                });
+            if near || brush == Some(true) {
+                let number = self.number_of(id);
+                if number != ENTITY_NONE {
+                    out.push(number);
+                }
+            }
+        }
+        out
+    }
+
+    fn sight_clear(&mut self, start: [f32; 3], end: [f32; 3], pass: [i32; 2], mask: u32) -> bool {
+        let ignore = pass.iter().find_map(|&e| self.client(e));
+        let ignore_model = pass.iter().find_map(|&e| self.model(e));
+        let outcome = crate::bullet_collision::bullet_trace_with_entity_models(
+            self.world.clip_brushes(),
+            self.world.clip_bsp(),
+            self.world.clip_cmodels(),
+            self.world.clip_mesh(),
+            &self.query.players.poses,
+            &self.query.entities.rows,
+            &BulletTraceQuery {
+                start,
+                end,
+                mask,
+                ignore,
+                ignore_hit: None,
+                ignore_model,
+            },
+            &|_| true,
+        );
+        matches!(outcome, TraceOutcome::Miss { .. })
+    }
+
+    fn player(&self, entity: i32) -> Option<game_api::movement::MovePlayer> {
+        let id = self.client(entity)?;
+        let frozen = self.world.client_meta(id).is_some_and(|m| m.controls.frozen);
+        Some(self.world.player(id)?.move_player(id.0 as i32, frozen))
+    }
+
+    fn players_ignore_radius_damage(&self) -> bool {
+        self.world
+            .ecs_ref()
+            .get_resource::<crate::script::RoundScript>()
+            .is_some_and(|runtime| runtime.engine.players_ignore_radius_damage)
+    }
+
     fn notify(&mut self, entity: i32, name: &str, weapon: Option<u32>) {
         let Some(client) = self.client(entity) else {
             return;
@@ -339,4 +498,44 @@ impl FireWorld for MatchFireWorld<'_, '_> {
         let weapon = weapon.map(|w| crate::script_player::weapon_name(self.world, w));
         crate::script::notify_player(self.world.ecs(), client.0, name, weapon.as_deref());
     }
+}
+
+/// A script's RadiusDamage by the game's own blast rules; false when the
+/// match runs no game rules for it.
+pub(crate) fn script_blast(
+    world: &mut FrameWorld,
+    tick: Tick,
+    blast: &crate::script::ScriptBlast,
+) -> bool {
+    let Some(movement) = crate::game_move::rules(world) else {
+        return false;
+    };
+    if !crate::game_move::game_weapons(world) {
+        return false;
+    }
+    let mut around = MatchFireWorld::new(world, tick, blast.attacker);
+    let inflictor = blast
+        .inflictor
+        .map_or(ENTITY_NONE, |id| around.number_of(id));
+    let attacker = blast.attacker.map_or(ENTITY_WORLD, |id| id.0 as i32);
+    let rules = game_api::fire::RadiusDamage {
+        origin: blast.origin,
+        inflictor,
+        attacker,
+        inner: blast.max,
+        outer: blast.min,
+        radius: blast.radius,
+        cone: None,
+        ignore: inflictor,
+        means: blast.means,
+        weapon: blast.weapon,
+        script: true,
+    };
+    let Some(gaps) = movement.radius_damage(&rules, &mut around) else {
+        return false;
+    };
+    for gap in gaps {
+        world.report_game_gap(gap);
+    }
+    true
 }
