@@ -132,17 +132,15 @@ fn refresh(
             })
             .collect::<Vec<_>>()
             .into();
-        state.input.localized = strings
-            .as_ref()
-            .map(|strings| {
-                strings
-                    .0
-                    .iter()
-                    .map(|(key, value)| (key.to_owned(), value.to_owned()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_else(Vec::new)
-            .into();
+        state.input.localized = match strings.as_ref() {
+            Some(strings) => strings
+                .0
+                .iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect::<Vec<_>>(),
+            None => Vec::new(),
+        }
+        .into();
         state.input.fonts = [
             "normalFont",
             "bigFont",
