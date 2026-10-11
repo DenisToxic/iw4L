@@ -636,6 +636,14 @@ pub(crate) enum MotionPath {
         from: [f32; 3],
         velocity: [f32; 3],
     },
+    /// `base + delta·sin(2π·(now − phase)/period)`, then `end` once done.
+    Sine {
+        base: [f32; 3],
+        delta: [f32; 3],
+        phase_ms: i64,
+        period_ms: i32,
+        end: [f32; 3],
+    },
 }
 
 const GRAVITY: f32 = 800.0;
@@ -680,6 +688,23 @@ impl Motion {
                     std::array::from_fn(|i| from[i] + (to[i] - from[i]) * fraction),
                     std::array::from_fn(|i| (to[i] - from[i]) * rate),
                 )
+            }
+            MotionPath::Sine {
+                base,
+                delta,
+                phase_ms,
+                period_ms,
+                end,
+            } => {
+                if elapsed >= self.duration_ms {
+                    return (end, [0.0; 3]);
+                }
+                if period_ms == 0 {
+                    return (base, [0.0; 3]);
+                }
+                let turn = (now - phase_ms) as i32 as f32 / period_ms as f32 * 3.141_592_7 * 2.0;
+                let wave = f64::from(turn).sin() as f32;
+                (std::array::from_fn(|i| delta[i] * wave + base[i]), [0.0; 3])
             }
             MotionPath::Ballistic { from, velocity } => {
                 let mut p: [f32; 3] = std::array::from_fn(|i| from[i] + velocity[i] * t);
