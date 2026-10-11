@@ -13,6 +13,7 @@ pub(crate) struct RestartPlan {
     pub entities: Arc<Vec<Vec<(String, String)>>>,
     pub tables: Arc<BTreeMap<String, StringTable>>,
     pub keys: Arc<BTreeMap<String, KeyType>>,
+    pub entity_fields: Arc<Option<BTreeMap<String, KeyType>>>,
     pub entries: Vec<String>,
     pub schemas: BTreeMap<String, Arc<structured_data_iw4::DefinitionSet>>,
     pub player_data_defaults: Option<Arc<crate::PlayerDataDefaults>>,

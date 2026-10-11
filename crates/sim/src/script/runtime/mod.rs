@@ -132,6 +132,9 @@ const SP_CALLBACKS: &str = "maps/_callbacksetup::";
 /// looks them up by hash). Only those that take no arguments are found here:
 /// the others' arguments are not Black Ops 3's yet.
 const SHARED_CALLBACKS: &str = "scripts/shared/callbacks_shared::";
+/// Black Ops 2's zombies keep theirs with the zombies gametypes; again only
+/// those without arguments.
+const ZOMBIES_CALLBACKS: &str = "maps/mp/gametypes_zm/_callbacksetup::";
 const SHARED_WITHOUT_ARGUMENTS: [&str; 2] = [
     "codecallback_playerconnect",
     "codecallback_playerdisconnect",
@@ -166,6 +169,12 @@ fn entry(world: &World, name: &str) -> Result<(Arc<Program>, usize, Location), F
             SHARED_WITHOUT_ARGUMENTS
                 .contains(&callback)
                 .then(|| program.names.get(&format!("{SHARED_CALLBACKS}{callback}")))?
+        })
+        .or_else(|| {
+            let callback = key.strip_prefix(MP_CALLBACKS)?;
+            SHARED_WITHOUT_ARGUMENTS
+                .contains(&callback)
+                .then(|| program.names.get(&format!("{ZOMBIES_CALLBACKS}{callback}")))?
         })
         .ok_or_else(|| Fault::at(&location, "unknown script entry point"))?;
     Ok((program, function, location))

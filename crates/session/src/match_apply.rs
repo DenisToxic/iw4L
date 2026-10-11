@@ -1260,6 +1260,7 @@ fn preflight_match_install(
         schemas: sources.0.schemas().clone(),
         entities: sim::script::parse_entity_string(sources.0.entities().unwrap_or("")),
         keys,
+        entity_fields: None,
         tables: sources
             .0
             .tables()
@@ -1395,20 +1396,27 @@ fn preflight_match_install(
     script_dvars.extend(script_dvar_overrides());
     let script_entries = program.entries;
     let gametype_settings = program.settings;
+    let key_type = |ty| match ty {
+        game_api::KeyType::Int => sim::script::KeyType::Int,
+        game_api::KeyType::Float => sim::script::KeyType::Float,
+        game_api::KeyType::String => sim::script::KeyType::String,
+        game_api::KeyType::Vector => sim::script::KeyType::Vector,
+    };
     if !program.key_types.is_empty() {
         script_level.keys = program
             .key_types
             .into_iter()
-            .map(|(key, ty)| {
-                let ty = match ty {
-                    game_api::KeyType::Int => sim::script::KeyType::Int,
-                    game_api::KeyType::Float => sim::script::KeyType::Float,
-                    game_api::KeyType::String => sim::script::KeyType::String,
-                    game_api::KeyType::Vector => sim::script::KeyType::Vector,
-                };
-                (key, ty)
-            })
+            .map(|(key, ty)| (key, key_type(ty)))
             .collect();
+    }
+    if !program.entity_fields.is_empty() {
+        script_level.entity_fields = Some(
+            program
+                .entity_fields
+                .into_iter()
+                .map(|(key, ty)| (key, key_type(ty)))
+                .collect(),
+        );
     }
     let actor_anim_sources: Vec<(String, String)> = if is_zombies {
         sources

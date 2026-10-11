@@ -56,6 +56,7 @@ impl game_api::GameScripts for T7 {
             built: Some(built.program),
             settings,
             key_types: entity_key_types(request.entities),
+            entity_fields: Vec::new(),
             dvars: Vec::new(),
         })
     }

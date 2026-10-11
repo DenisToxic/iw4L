@@ -21,6 +21,7 @@ impl game_api::GameScripts for Iw4 {
             built: None,
             settings: Vec::new(),
             key_types: Vec::new(),
+            entity_fields: Vec::new(),
             dvars: Vec::new(),
         })
     }

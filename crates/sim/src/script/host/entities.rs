@@ -23,6 +23,9 @@ pub struct LevelData {
     pub entities: Vec<Vec<(String, String)>>,
     pub tables: BTreeMap<String, StringTable>,
     pub keys: BTreeMap<String, KeyType>,
+    /// The keys the engine reads into an entity itself; when given, other
+    /// keys not in `keys` are dropped, and a struct keeps only `keys`.
+    pub entity_fields: Option<BTreeMap<String, KeyType>>,
     pub schemas: BTreeMap<String, Arc<structured_data_iw4::DefinitionSet>>,
     pub player_data_defaults: Option<crate::PlayerDataDefaults>,
 }
@@ -453,6 +456,7 @@ impl RoundScript {
         &mut self,
         entities: &[Vec<(String, String)>],
         keys: &BTreeMap<String, KeyType>,
+        entity_fields: Option<&BTreeMap<String, KeyType>>,
     ) -> Result<Vec<u64>, String> {
         self.zombies.authored = Arc::new(entities.to_vec());
         let structs = match self.object_field(0, "struct") {
@@ -521,7 +525,25 @@ impl RoundScript {
                 // A game that names fields by hash lists its keys' types
                 // itself (Black Ops 3's executable); they come first.
                 let listed = keys.get(&key).filter(|_| field_name.is_some());
+                // A game that lists its engine's entity fields keeps only
+                // those and its listed keys (a struct only the latter).
+                let strict = entity_fields.map(|fields| {
+                    let own = fields.get(&key).filter(|_| classname != "script_struct");
+                    own.or_else(|| keys.get(&key))
+                });
                 let value = match key.as_str() {
+                    _ if let Some(ty) = strict => {
+                        let Some(ty) = ty else { continue };
+                        let typed = typed_key(*ty, value);
+                        match (key.as_str(), &typed) {
+                            ("radius", Value::Int(n)) => radius = Some(*n as f32),
+                            ("radius", Value::Float(n)) => radius = Some(*n),
+                            ("height", Value::Int(n)) => height = Some(*n as f32),
+                            ("height", Value::Float(n)) => height = Some(*n),
+                            _ => {}
+                        }
+                        typed
+                    }
                     _ if let Some(ty) = listed => {
                         let typed = typed_key(*ty, value);
                         match (key.as_str(), &typed) {
