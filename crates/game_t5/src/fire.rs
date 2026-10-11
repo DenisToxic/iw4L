@@ -87,8 +87,12 @@ const HIT_LOCATIONS: [&str; 19] = [
 
 /// `weaponType`: a weapon that fires bullets.
 const WEAPTYPE_BULLET: i32 = 0;
+/// `weaponType`: a thrown grenade.
+const WEAPTYPE_GRENADE: i32 = 1;
 /// `weaponType`: a projectile weapon.
 const WEAPTYPE_PROJECTILE: i32 = 2;
+/// `weaponType`: a mine, thrown like a grenade.
+const WEAPTYPE_MINE: i32 = 6;
 /// `weaponClass` of a projectile weapon that launches grenades.
 const WEAPCLASS_GRENADE_LAUNCHER: i32 = 5;
 /// `weaponClass`: a spread weapon, its pellets out to its own range.
@@ -253,7 +257,25 @@ pub(crate) fn server_events(
                 };
                 shot.melee(world);
             }
-            ev::USE_OFFHAND | ev::DETONATE | ev::GRENADE_SUICIDE => {
+            ev::USE_OFFHAND => {
+                let shot = Shot {
+                    ps,
+                    aim_spread_before,
+                    view_before,
+                    zombies,
+                    gaps: &mut gaps,
+                };
+                shot.throw_offhand(parm, world);
+            }
+            ev::PULLBACK_WEAPON | ev::PREP_OFFHAND => {
+                let weapon = u32::try_from(parm).unwrap_or(0);
+                world.notify(
+                    ps.client_num,
+                    "grenade_pullback",
+                    &[NotifyArg::Weapon(weapon)],
+                );
+            }
+            ev::DETONATE | ev::GRENADE_SUICIDE => {
                 gaps.push(fire_unknown());
             }
             _ => {}
@@ -496,8 +518,46 @@ impl Shot<'_> {
                     self.gaps,
                 );
             }
+            WEAPTYPE_GRENADE | WEAPTYPE_MINE => crate::grenade::fire_grenade(
+                self.attacker(),
+                weapon,
+                &def,
+                parms.forward,
+                parms.up,
+                parms.muzzle,
+                world,
+                self.gaps,
+            ),
             _ => self.gaps.push(fire_unknown()),
         }
+    }
+
+    /// The offhand grenade let go: thrown from the eye along the aim, with
+    /// no weapon_fired notify.
+    fn throw_offhand(mut self, parm: i32, world: &mut dyn FireWorld) {
+        let weapon = self.ps.offhand_index;
+        let Some((def_bytes, variant_bytes)) = world
+            .weapon(weapon)
+            .map(|w| (w.def.clone(), w.variant.clone()))
+        else {
+            self.gaps.push(crate::movement::weapon_unknown());
+            return;
+        };
+        let Some(def) = WeaponDefView::new(&def_bytes, &variant_bytes) else {
+            self.gaps.push(crate::movement::weapon_unknown());
+            return;
+        };
+        let parms = self.weapon_parms(&def, parm, world);
+        crate::grenade::fire_grenade(
+            self.attacker(),
+            weapon,
+            &def,
+            parms.forward,
+            parms.up,
+            parms.muzzle,
+            world,
+            self.gaps,
+        );
     }
 
     /// The player's eye and the axes of the aim.

@@ -1475,7 +1475,7 @@ pub(crate) fn game_trajectory(tr: &game_api::fire::GameTrajectory) -> Trajectory
     }
 }
 
-fn push_grenade_bounce(
+pub(crate) fn push_grenade_bounce(
     world: &mut FrameWorld,
     tick: Tick,
     projectile: &ProjectileState,

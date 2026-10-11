@@ -548,6 +548,10 @@ pub struct GameWeaponBytes {
     pub named_anims: u128,
     /// The definition's damage multipliers by hit location.
     pub location_damage: Option<[f32; 19]>,
+    /// The definition's bounce coefficients along and across a surface, by
+    /// surface type.
+    pub parallel_bounce: Option<[f32; 31]>,
+    pub perpendicular_bounce: Option<[f32; 31]>,
 }
 
 #[derive(Clone, Debug)]

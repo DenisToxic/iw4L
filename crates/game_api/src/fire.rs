@@ -192,8 +192,17 @@ pub trait FireWorld {
     /// Adds to a player's velocity.
     fn push_player(&mut self, entity: i32, velocity: [f32; 3]);
 
+    /// Stores a player as its movement keeps it, after the game changed it.
+    fn store_player(&mut self, entity: i32, player: &MovePlayer);
+
     /// A missile's explosion, as the clients show it.
     fn explosion(&mut self, explosion: &MissileExplosion);
+
+    /// A grenade's bounce sound off a surface type, as clients play it.
+    fn bounce(&mut self, missile: i32, surface_type: u8);
+
+    /// The match's time one frame ago.
+    fn previous_level_time(&self) -> i32;
 
     /// Notifies `name` on an entity with these arguments.
     fn notify(&mut self, entity: i32, name: &str, args: &[NotifyArg]);
@@ -298,4 +307,5 @@ pub enum NotifyArg {
     Vector([f32; 3]),
     Float(f32),
     Int(i32),
+    String(&'static str),
 }

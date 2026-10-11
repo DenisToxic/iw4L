@@ -334,7 +334,7 @@ pub(crate) fn unpack(player: &mut MovePlayer) -> (PlayerState, UserCmd) {
     (ps, last)
 }
 
-fn pack(player: &mut MovePlayer, ps: &mut PlayerState, last: &mut UserCmd) {
+pub(crate) fn pack(player: &mut MovePlayer, ps: &mut PlayerState, last: &mut UserCmd) {
     player.command_time = ps.command_time;
     player.origin = ps.origin;
     player.velocity = ps.velocity;

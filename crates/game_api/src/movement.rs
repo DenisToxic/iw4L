@@ -201,6 +201,10 @@ pub struct GameWeapon {
     /// The definition's damage multipliers by hit location, when it has its
     /// own.
     pub location_damage: Option<Box<[f32]>>,
+    /// The definition's bounce coefficients along and across a surface, by
+    /// surface type, when it has them.
+    pub parallel_bounce: Option<Box<[f32]>>,
+    pub perpendicular_bounce: Option<Box<[f32]>>,
 }
 
 /// The water over a point, as far as the match knows it.
