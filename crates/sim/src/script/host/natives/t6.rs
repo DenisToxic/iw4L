@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 mod barrier;
 mod effect;
 mod mover;
+mod sound;
 mod weapon;
 
 /// How Black Ops 2 finds a dvar: djb2 over the lowercased name.
@@ -1681,6 +1682,7 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     weapon::register_natives(registry);
     effect::register(registry);
     mover::register(registry);
+    sound::register(registry);
 }
 
 /// The node field a node lookup key names; it has to hold a string.

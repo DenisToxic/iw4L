@@ -642,6 +642,15 @@ pub(crate) fn play_sound_at(
     {
         return Err("cannot play a looping alias as a one-shot sound".into());
     }
+    sound_alias_event(world, origin, alias)
+}
+
+/// A one-shot sound at a point.
+pub(crate) fn sound_alias_event(
+    world: &mut World,
+    origin: [f32; 3],
+    alias: &str,
+) -> Result<(), String> {
     let index = crate::frame::FrameWorld::from_world(world).sound_alias_index(alias);
     if index == 0 {
         return Err("sound alias configstring table is full".into());
