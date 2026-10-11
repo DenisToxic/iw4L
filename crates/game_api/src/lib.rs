@@ -198,6 +198,9 @@ pub struct HudRules {
     pub script_text: bool,
     /// A script material elem grows to the elem's font height.
     pub material_font_floor: bool,
+    /// The mode is zombies: a player's own points, the round, perks and
+    /// power-ups stand where match scores and limits would.
+    pub zombies: bool,
 }
 
 /// How a game's screen reacts to its match: shellshocks.

@@ -64,6 +64,7 @@ const MODE: ModeRules = ModeRules {
         compass: true,
         script_text: true,
         material_font_floor: true,
+        zombies: false,
     },
 };
 

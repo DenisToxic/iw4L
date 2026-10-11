@@ -368,7 +368,7 @@ fn player_name(snapshot: &Snapshot, id: ClientId) -> String {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn refresh(
     map: Option<Res<SessionMapIdentity>>,
     screen: Res<AppScreen>,
@@ -380,6 +380,7 @@ fn refresh(
     actions: Option<Res<ClientActionInput>>,
     generation: Option<Res<frame::WorldGeneration>>,
     clock: Option<Res<FrameClock>>,
+    mode: Option<Res<game_api::ModeRules>>,
     mut feed: ResMut<Killfeed>,
     mut roots: Query<(&mut Node, &mut Visibility), (With<T6HudRoot>, Without<Field>)>,
     mut fields: Query<(&Field, &mut Text, &mut TextColor, &mut Node)>,
@@ -425,6 +426,7 @@ fn refresh(
     let Some(meta) = snapshot.meta.for_client(local.0) else {
         return;
     };
+    let zombies = mode.is_some_and(|mode| mode.hud.zombies);
     let ended = meta.lifecycle == ClientLifecycle::Intermission
         || snapshot.meta.phase == MatchPhase::PostGame;
     let alive = meta.lifecycle == ClientLifecycle::Alive && ps.health > 0;
@@ -504,7 +506,7 @@ fn refresh(
     for (field, mut text, mut color, mut node) in &mut fields {
         let value = match field {
             Field::Match => {
-                let score = if snapshot.meta.kind.token() == "zclassic" {
+                let score = if zombies {
                     meta.score.to_string()
                 } else if snapshot.meta.kind.is_team() {
                     let team = usize::try_from(meta.client_state_team)
@@ -516,7 +518,7 @@ fn refresh(
                 } else {
                     format!("{}     LIMIT {}", meta.score, snapshot.meta.score_limit)
                 };
-                if snapshot.meta.kind.token() == "zclassic" {
+                if zombies {
                     score
                 } else {
                     format!(
@@ -527,9 +529,7 @@ fn refresh(
                     )
                 }
             }
-            Field::Round | Field::Use | Field::Powerups
-                if snapshot.meta.kind.token() == "zclassic" && alive && !scores =>
-            {
+            Field::Round | Field::Use | Field::Powerups if zombies && alive && !scores => {
                 let message = meta
                     .hud_archival
                     .iter()
@@ -579,7 +579,7 @@ fn refresh(
             }
             Field::Weapon if alive && !scores => name.clone(),
             Field::Ammo if alive && !scores => {
-                if snapshot.meta.kind.token() == "zclassic" {
+                if zombies {
                     format!("{clip}/{stock}")
                 } else {
                     format!("{clip:02}  /  {stock:03}")
@@ -606,9 +606,7 @@ fn refresh(
                     },
                 )
             }
-            Field::Status if ended && snapshot.meta.kind.token() == "zclassic" => {
-                "GAME OVER".into()
-            }
+            Field::Status if ended && zombies => "GAME OVER".into(),
             Field::Status if alive && ps.pm_flags & playerstate_iw4::pm_flags::LAST_STAND != 0 => {
                 "DOWNED - waiting for revive".into()
             }
@@ -641,10 +639,12 @@ fn refresh(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn refresh_art(
     presented: Res<PresentedSnapshot>,
     local: Res<LocalPresentClient>,
     actions: Option<Res<ClientActionInput>>,
+    mode: Option<Res<game_api::ModeRules>>,
     mut art: ResMut<crate::t6_art::T6Art>,
     mut images: ResMut<Assets<Image>>,
     mut sprites: Query<(&HudArt, &mut ImageNode, &mut Node), Without<Field>>,
@@ -664,7 +664,7 @@ fn refresh_art(
     let scores = actions
         .as_ref()
         .is_some_and(|actions| actions.client.kb.scores.active);
-    let zombies = snapshot.meta.kind.token() == "zclassic";
+    let zombies = mode.is_some_and(|mode| mode.hud.zombies);
     let labels: Vec<_> = meta
         .hud_archival
         .iter()
@@ -790,7 +790,7 @@ fn refresh_art(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn refresh_graphics(
     presented: Res<PresentedSnapshot>,
     local: Res<LocalPresentClient>,

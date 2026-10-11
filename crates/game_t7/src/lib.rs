@@ -198,6 +198,7 @@ const ZOMBIES_MODE: ModeRules = ModeRules {
         compass: false,
         script_text: false,
         material_font_floor: false,
+        zombies: true,
     },
 };
 
