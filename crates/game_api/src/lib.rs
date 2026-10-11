@@ -191,6 +191,9 @@ pub struct HudRules {
     pub code_hud: Rule<()>,
     /// The game's own HUD menus draw the weapon info in place of the code weaponbar.
     pub game_hud_menus: bool,
+    /// While the code-drawn HUD is unknown, the game's HUD menus, script hud
+    /// elems and script menus still draw; only the code-drawn pieces hide.
+    pub script_hud: bool,
     pub scoreboard: bool,
     pub scorebar: bool,
     pub compass: bool,

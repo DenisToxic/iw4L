@@ -59,6 +59,7 @@ const MODE: ModeRules = ModeRules {
     hud: HudRules {
         code_hud: Rule::Known(()),
         game_hud_menus: false,
+        script_hud: false,
         scoreboard: true,
         scorebar: true,
         compass: true,

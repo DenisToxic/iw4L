@@ -276,7 +276,7 @@ pub(crate) fn item_screen_rects(
     };
     let mut out = Vec::new();
     for (index, item) in menu.items.iter().enumerate() {
-        if !matches!(exprs.is_true(&item.vis_exp, host), Ok(true)) {
+        if !item_dvar_shows(item, host) || !matches!(exprs.is_true(&item.vis_exp, host), Ok(true)) {
             continue;
         }
         let Ok(style) = evaluate_item_style(
@@ -306,6 +306,25 @@ pub(crate) fn item_screen_rects(
     out
 }
 
+/// An item whose dvar test shows or hides it: a value in its enable list
+/// shows it under the show flag and hides it under the hide flag; an unlisted
+/// value does the opposite.
+fn item_dvar_shows(item: &MenuItem, host: &impl ExprHost) -> bool {
+    const ITEM_DVAR_SHOW: i32 = 0x4;
+    const ITEM_DVAR_HIDE: i32 = 0x8;
+    if item.dvar_flags & (ITEM_DVAR_SHOW | ITEM_DVAR_HIDE) == 0
+        || item.enable_dvar.is_empty()
+        || item.dvar_test.is_empty()
+    {
+        return true;
+    }
+    let value = host.dvar_string(&item.dvar_test).unwrap_or_default();
+    let listed = crate::menus::script_tokens(&item.enable_dvar)
+        .iter()
+        .any(|token| token.eq_ignore_ascii_case(&value));
+    listed == (item.dvar_flags & ITEM_DVAR_SHOW != 0)
+}
+
 fn paint_item(
     menu: &MenuDef,
     index: usize,
@@ -319,6 +338,10 @@ fn paint_item(
     owner_draw: Option<&mut dyn FnMut(OwnerDrawArgs<'_>, &mut ChromeFrame) -> OwnerDrawPaint>,
     frame: &mut ChromeFrame,
 ) {
+    if !item_dvar_shows(item, host) {
+        frame.coverage.vis_false();
+        return;
+    }
     match exprs.is_true(&item.vis_exp, host) {
         Ok(false) => {
             frame.coverage.vis_false();
