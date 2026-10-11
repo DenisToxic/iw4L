@@ -4,8 +4,20 @@ use super::script::library::Library;
 use super::script::runtime::{Bindings, Callback};
 use super::script::tables::Tables;
 use super::script::{Environment, FaultKind, Value};
+use game_api::{Unknown, unknown};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+const GC: &Unknown = unknown!(
+    "t6.ui.gc",
+    "LUI elements and animation states are never collected",
+    "Black Ops 2's LUI element and animation-state collectors"
+);
+const TIMED_TRANSITIONS: &Unknown = unknown!(
+    "t6.ui.timed_transitions",
+    "animateToState with a duration, or while a transition runs",
+    "Black Ops 2's LUI transition timing and interpolation"
+);
 
 const CONSTRUCT: u32 = 7;
 const COLLECT: u32 = 8;
@@ -135,11 +147,12 @@ impl Elements {
             .get(identity)
             .ok_or(FaultKind::Userdata(*identity))?;
         if element.animation_target.is_some() {
-            return Err(FaultKind::BindingRequired);
+            return Err(FaultKind::Unknown(TIMED_TRANSITIONS));
         }
         match arguments.get(2) {
             None | Some(Value::Nil | Value::Boolean(_) | Value::Reference { .. }) => {}
             Some(Value::Number(value)) if value.is_finite() && value.trunc() == 0.0 => {}
+            Some(Value::Number(_)) => return Err(FaultKind::Unknown(TIMED_TRANSITIONS)),
             _ => return Err(FaultKind::BindingRequired),
         }
         let name = match arguments.get(1) {
@@ -232,7 +245,7 @@ impl Bindings for Elements {
     ) -> Result<Vec<Value>, FaultKind> {
         match function {
             CONSTRUCT => Ok(vec![self.construct(tables)?]),
-            COLLECT | COLLECT_ANIMATION_STATE => Err(FaultKind::BindingRequired),
+            COLLECT | COLLECT_ANIMATION_STATE => Err(FaultKind::Unknown(GC)),
             SET_LAYOUT_CACHED => {
                 self.set_layout_cached(arguments)?;
                 Ok(Vec::new())
