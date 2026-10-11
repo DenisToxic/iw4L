@@ -125,6 +125,7 @@ const ZOMBIE_MODE: ModeRules = ModeRules {
             "Black Ops' HUD rules from its executable, or reference shots of each piece"
         )),
         game_hud_menus: true,
+        script_hud: true,
         scoreboard: false,
         scorebar: false,
         compass: false,

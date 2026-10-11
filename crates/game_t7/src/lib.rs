@@ -193,6 +193,7 @@ const ZOMBIES_MODE: ModeRules = ModeRules {
             "Black Ops 3's HUD rules"
         )),
         game_hud_menus: false,
+        script_hud: false,
         scoreboard: false,
         scorebar: false,
         compass: false,

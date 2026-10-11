@@ -234,6 +234,7 @@ const MULTIPLAYER_MODE: ModeRules = ModeRules {
             "Black Ops 2's HUD rules"
         )),
         game_hud_menus: false,
+        script_hud: false,
         scoreboard: true,
         scorebar: true,
         compass: true,
