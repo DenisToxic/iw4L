@@ -1,3 +1,4 @@
+mod builtins;
 mod startup;
 
 use game_api::{HudRules, LibraryMode, ModeRules, Rule, ScriptProgram, ScriptRequest, unknown};
@@ -39,7 +40,7 @@ impl game_api::GameScripts for T6 {
         }
         let startup = startup::T6Startup::new(request.map);
         Rule::Known(ScriptProgram {
-            catalog: gsc::Catalog::from_list(asset_core::FamilyId::T6, &[]),
+            catalog: gsc::Catalog::from_list(asset_core::FamilyId::T6, &catalog()),
             roots: startup.roots,
             entries: startup.entries,
             built: None,
@@ -55,6 +56,18 @@ impl game_api::GameScripts for T6 {
     fn config_defaults(&self) -> &'static [(&'static str, &'static str)] {
         &[]
     }
+}
+
+/// Black Ops 2's builtins, the first of each name as its loader finds them.
+fn catalog() -> Vec<gsc::Builtin> {
+    let list = |namespace, specs: &'static [gsc_t6::BuiltinSpec]| {
+        specs.iter().map(move |spec| {
+            gsc::Builtin::new(namespace, spec.name, gsc::Owner::Script, spec.developer)
+        })
+    };
+    list(gsc::Namespace::Function, &builtins::FUNCTIONS)
+        .chain(list(gsc::Namespace::Method, &builtins::METHODS))
+        .collect()
 }
 
 /// IW4L's Free for All rules for Black Ops 2 (docs/fidelity/t6.md).
