@@ -134,7 +134,7 @@ impl Bindings for Library {
                     Err(FaultKind::ScriptError(message.to_vec()))
                 }
             }
-            _ => Err(FaultKind::BindingRequired),
+            _ => Err(FaultKind::Unknown(super::ENGINE_API)),
         }
     }
 }

@@ -3,7 +3,24 @@ pub mod runtime;
 pub mod tables;
 
 use fastfile_t6::hks::{self, Constant, Instruction};
+use game_api::{Unknown, unknown};
 use std::sync::Arc;
+
+pub const OPCODES: &Unknown = unknown!(
+    "t6.ui.opcodes",
+    "a HavokScript opcode the UI runtime does not execute",
+    "the opcode's handler in Black Ops 2's HavokScript interpreter"
+);
+pub const ENGINE_API: &Unknown = unknown!(
+    "t6.ui.engine_api",
+    "an engine method or library function the UI runtime does not provide",
+    "the function's handler in Black Ops 2"
+);
+pub const METAMETHODS: &Unknown = unknown!(
+    "t6.ui.metamethods",
+    "function __index/__newindex, __call and __eq are not run",
+    "Black Ops 2's HavokScript metamethod dispatch"
+);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
@@ -170,7 +187,7 @@ pub enum FaultKind {
     Function(usize),
     Upvalue(usize),
     Capture(usize),
-    Opcode(u8),
+    Unknown(&'static Unknown),
     Branch(isize),
     Budget,
 }
@@ -237,7 +254,7 @@ impl Frame {
                 } else if left == right {
                     Ok(true)
                 } else if matches!(left_kind, 5 | 7) {
-                    Err(self.fault(FaultKind::ComparisonRequired))
+                    Err(self.fault(FaultKind::Unknown(METAMETHODS)))
                 } else {
                     Ok(false)
                 }
@@ -297,8 +314,13 @@ impl Frame {
                 } else {
                     self.register(a)?
                 };
-                if !matches!(callee, Value::Reference { kind: 9 | 10, .. }) {
-                    return Err(self.fault(FaultKind::BindingRequired));
+                match callee {
+                    Value::Reference { kind: 9 | 10, .. } => {}
+                    Value::Nil => return Err(self.fault(FaultKind::Unknown(ENGINE_API))),
+                    Value::Reference { kind: 5 | 7, .. } => {
+                        return Err(self.fault(FaultKind::Unknown(METAMETHODS)));
+                    }
+                    _ => return Err(self.fault(FaultKind::BindingRequired)),
                 }
                 let end = if b == 0 { self.top } else { a + b };
                 let arguments = self
@@ -530,7 +552,7 @@ impl Frame {
                     self.store(a, value)?;
                 }
             }
-            _ => return Err(self.fault(FaultKind::Opcode(opcode))),
+            _ => return Err(self.fault(FaultKind::Unknown(OPCODES))),
         }
         self.pc = next;
         Ok(result)

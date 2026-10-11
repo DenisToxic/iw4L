@@ -1,7 +1,14 @@
 use super::script::tables::Tables;
 use super::script::{Environment, FaultKind, Value};
 use super::{Axis, State};
+use game_api::{Unknown, unknown};
 use std::sync::Arc;
+
+const RENDER: &Unknown = unknown!(
+    "t6.ui.render",
+    "animation-state material, font, alignment, shader vectors and 3D window",
+    "Black Ops 2's LUI layout, input and rendering"
+);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AnimationState {
@@ -166,7 +173,7 @@ impl AnimationState {
             b"ui3DWindow",
         ] {
             if field(tables, table, name)? != Value::Nil {
-                return Err(FaultKind::BindingRequired);
+                return Err(FaultKind::Unknown(RENDER));
             }
         }
         Ok(Self {
