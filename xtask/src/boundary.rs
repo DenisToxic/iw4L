@@ -35,6 +35,8 @@ const REGISTRATION: &str = "crates/session/src/games.rs";
 const IDENTITY: &str = "crates/asset_core/src/family.rs";
 /// This check has to spell the shapes it hunts for.
 const SELF: &str = "xtask/src/boundary.rs";
+/// The ledger guard names the game whose crates every game shares.
+const LEDGER_GUARD: &str = "xtask/src/ledger_guard.rs";
 const GAMES: [&str; 5] = ["iw4", "t5", "iw5", "t6", "t7"];
 const GAME_VARIANTS: [&str; 5] = ["Iw4", "T5", "Iw5", "T6", "T7"];
 const GAME_ENUMS: [&str; 4] = ["ZoneGame", "AssetNamespace", "FamilyId", "Realm"];
@@ -180,7 +182,8 @@ pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
             }
             match package.layer {
                 Some(Layer::Game | Layer::Format) | None => {}
-                Some(_) if [REGISTRATION, IDENTITY, SELF].contains(&rel.as_str()) => {}
+                Some(_) if [REGISTRATION, IDENTITY, SELF, LEDGER_GUARD].contains(&rel.as_str()) => {
+                }
                 Some(_) => {
                     for (shape, count) in game_shapes(&text, &game_idents) {
                         findings.insert(format!("pattern {rel} {shape}"), count);
