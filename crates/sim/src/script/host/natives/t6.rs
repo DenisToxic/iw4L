@@ -9,6 +9,8 @@ use crate::script::{ArrayKey, Namespace, NativeRegistry, RoundScript, Value};
 use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 
+mod actor;
+mod attach;
 mod barrier;
 mod effect;
 mod mover;
@@ -1644,7 +1646,6 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         (Method, "spawn"),
         (Method, "enableweapons"),
         (Method, "disableweapons"),
-        (Method, "detachall"),
         (Method, "setviewmodel"),
         (Method, "setmovespeedscale"),
         (Method, "giveweapon"),
@@ -1691,6 +1692,8 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             registry.register(namespace, name, native);
         }
     }
+    actor::register(registry);
+    attach::register(registry);
     barrier::register(registry);
     weapon::register_natives(registry);
     effect::register(registry);
