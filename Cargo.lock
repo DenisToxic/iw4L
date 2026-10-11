@@ -3276,6 +3276,7 @@ dependencies = [
  "asset_core",
  "game_api",
  "gsc",
+ "gsc_t6",
 ]
 
 [[package]]
@@ -3449,6 +3450,7 @@ name = "gsc_t6"
 version = "0.1.0"
 dependencies = [
  "gsc",
+ "sha2",
 ]
 
 [[package]]
