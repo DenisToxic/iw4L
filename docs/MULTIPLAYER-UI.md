@@ -36,11 +36,13 @@ Hosts can return everyone to the existing lobby with **End Match**.
 **Leave Match** disconnects only the local player.
 
 Zombies perk icons have twelve slots and use the installed BO2 perk materials,
-including Electric Cherry, Vulture Aid and Who's Who. Icon size and spacing
-follow the authored perk module; safe-area placement, split-screen scaling,
-perk acquisition animations and native client-field state remain unfinished.
-Zombies ammo uses the authored unpadded clip/stock label; dual-wield ammo
-and native multiplayer HUD digits remain unfinished.
+including Electric Cherry, Vulture Aid and Who's Who. Icon size, spacing and
+the perk-to-material table are IW4L's (`t6.hud.perk_slots`,
+`t6.hud.perk_materials` in docs/fidelity/t6.md), not read from the perk module;
+safe-area placement, split-screen scaling, perk acquisition animations and
+native client-field state remain unfinished. Zombies ammo is IW4L's unpadded
+clip/stock label (`t6.hud.zm_ammo`); dual-wield ammo and native multiplayer
+HUD digits remain unfinished.
 
 UI preparation decodes installed PC HavokScript modules and literal material names,
 including patch-zone HUD/menu artwork. The runtime supports scalar instructions,
