@@ -585,6 +585,25 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         }
         Ok(Value::Undefined)
     });
+    registry.register(Function, "arrayremoveindex", |world, _, args| {
+        let id = array_id(args, 0)?;
+        let index = int(args, 1)?;
+        let keep_keys = args.len() == 3 && int(args, 2)? != 0;
+        let mut runtime = world.resource_mut::<RoundScript>();
+        let array = runtime
+            .arrays
+            .get_mut(&id)
+            .ok_or("invalid array reference")?;
+        array.remove(&ArrayKey::Integer(index));
+        if !keep_keys {
+            let values = std::mem::take(array).into_values();
+            *array = values
+                .enumerate()
+                .map(|(index, value)| (ArrayKey::Integer(index as i32), value))
+                .collect();
+        }
+        Ok(Value::Undefined)
+    });
     // An index inside the array moves the entries from it up by one; any
     // other appends.
     registry.register(Function, "arrayinsert", |world, _, args| {
@@ -1469,6 +1488,102 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Ok(Value::Undefined)
     });
 
+    registry.register(Function, "playsoundatposition", |world, _, args| {
+        let origin = vector(args, 1)?;
+        let alias = string(args, 0)?;
+        super::engine::play_sound_at(world, origin, &alias)?;
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "disablegrenadesuicide", |world, _, _| {
+        world.insert_resource(GrenadeSuicideDisabled);
+        Ok(Value::Undefined)
+    });
+    // Demo bookmarks only matter while a demo records.
+    registry.register(Function, "adddemobookmark", |_, _, _| Ok(Value::Undefined));
+    // Clients beyond the host's own: none in a solo match.
+    registry.register(Function, "numremoteclients", |_, _, _| Ok(Value::Int(0)));
+    // Each client's last snapshot number plus one (undefined for one not
+    // active), then the server's time plus 1000.
+    registry.register(Function, "getsnapshotindexarray", |world, _, _| {
+        let tick = world.resource::<crate::step::StepRequest>().tick;
+        let now = i32::try_from(u64::from(tick.0) * u64::from(crate::MATCH_TICK_MS))
+            .map_err(|_| "time overflow")?;
+        let mut players: Vec<i32> = world
+            .resource::<RoundScript>()
+            .entities
+            .values()
+            .filter(|entity| entity.kind == EntityKind::Player)
+            .map(|entity| entity.number)
+            .collect();
+        players.sort_unstable();
+        let mut values: Vec<Value> = Vec::new();
+        let count = players.last().map_or(0, |n| n + 1);
+        for number in 0..count {
+            values.push(if players.contains(&number) {
+                Value::Int(tick.0 as i32 + 1)
+            } else {
+                Value::Undefined
+            });
+        }
+        values.push(Value::Int(now + 1000));
+        new_array(world, values)
+    });
+    registry.register(Function, "clientsyssetstate", |world, _, args| {
+        let index = int(args, 0)?;
+        if !(0..=8).contains(&index) {
+            return Err(format!("ClientSysSetState - state index ({index}) out of bounds (0 - 8)"));
+        }
+        let registered = world
+            .get_resource::<ClientSystems>()
+            .is_some_and(|systems| (index as usize) < systems.0.len());
+        if !registered {
+            return Err(format!(
+                "ClientSysSetState - state index ({index}) unregistered.  Use ClientSysRegister first."
+            ));
+        }
+        let state = match args.get(1) {
+            Some(_) => string(args, 1)?.replace(' ', "!"),
+            None => String::new(),
+        };
+        world
+            .get_resource_or_insert_with(ClientSystemStates::default)
+            .0
+            .insert(index as usize, state);
+        Ok(Value::Undefined)
+    });
+    // A client field on an entity, in the pool of its kind.
+    registry.register(Function, "codesetclientfield", |world, _, args| {
+        let id = super::engine::entity_id(world, arg(args, 0)?)
+            .map_err(|_| String::from("Entity does not exist."))?;
+        let pool = {
+            let runtime = world.resource::<RoundScript>();
+            let entity = &runtime.entities[&id];
+            match entity.kind {
+                EntityKind::Actor => "actor",
+                EntityKind::Player => "allplayers",
+                _ if SCRIPT_MOVERS.contains(&&*entity.classname) => "scriptmover",
+                _ if entity.classname.starts_with("zbarrier") => "zbarrier",
+                _ => return Err("Unknown client field set.".into()),
+            }
+        };
+        set_client_field(world, pool, id, args)
+    });
+    registry.register(
+        Function,
+        "codesetplayerstateclientfield",
+        |world, _, args| {
+            let receiver = arg(args, 0)?.clone();
+            let client = client_of(world, &receiver).map_err(|_| {
+                String::from("GScr_CodeSetPlayerStateClientField: must be called on a player.")
+            })?;
+            set_client_field(world, "toplayer", u64::from(client), args)
+        },
+    );
+    registry.register(Method, "resetfov", |world, receiver, _| {
+        client_of(world, receiver)?;
+        Ok(Value::Undefined)
+    });
+
     // IW4L's own builtins whose state and checks match Black Ops 2's handler
     // on the arguments it accepts.
     let shared = NativeRegistry::engine_services();
@@ -1507,8 +1622,58 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         (Method, "closeingamemenu"),
         (Function, "iprintln"),
         (Method, "getguid"),
+        (Method, "settext"),
+        (Method, "destroy"),
+        (Function, "playfxontag"),
+        // The player's weapons and movement: IW4L's, as Black Ops 2's own
+        // movement is not yet read (`docs/fidelity/t6.md`).
+        (Method, "spawn"),
+        (Method, "enableweapons"),
+        (Method, "disableweapons"),
+        (Method, "detachall"),
+        (Method, "setviewmodel"),
+        (Method, "setmovespeedscale"),
+        (Method, "giveweapon"),
+        (Method, "givestartammo"),
+        (Method, "givemaxammo"),
+        (Method, "switchtoweapon"),
+        (Method, "setmaxhealth"),
+        (Method, "hasweapon"),
+        (Method, "setweaponammoclip"),
+        (Method, "setweaponammostock"),
+        (Method, "getweaponammoclip"),
+        (Method, "getweaponammostock"),
+        (Method, "setactionslot"),
+        (Method, "hasperk"),
+        (Method, "setperk"),
+        (Method, "unsetperk"),
+        (Method, "getweaponslistprimaries"),
+        (Method, "getweaponslist"),
+        (Method, "takeweapon"),
+        (Method, "takeallweapons"),
+        (Method, "getcurrentweapon"),
+        (Method, "isonground"),
+        (Function, "bullettrace"),
     ] {
         if let Some(native) = shared.get(namespace, name) {
+            registry.register(namespace, name, native);
+        }
+    }
+    // Black Ops' own player builtins of the same name.
+    let black_ops = NativeRegistry::engine_services().with_black_ops();
+    for (namespace, name) in [
+        (Method, "stopburning"),
+        (Method, "setsprintduration"),
+        (Method, "setsprintcooldown"),
+        (Method, "playerknockback"),
+        (Method, "cameraactivate"),
+        (Method, "setblur"),
+        (Method, "isinvehicle"),
+        (Method, "isthrowinggrenade"),
+        (Method, "setinvisibletoplayer"),
+        (Method, "setvisibletoplayer"),
+    ] {
+        if let Some(native) = black_ops.get(namespace, name) {
             registry.register(namespace, name, native);
         }
     }
@@ -1627,6 +1792,40 @@ fn absolute_bounds(world: &mut World, id: u64) -> ([f32; 3], [f32; 3]) {
         (origin.map(|o| o - radius), origin.map(|o| o + radius))
     };
     (low.map(|v| v - 1.0), high.map(|v| v + 1.0))
+}
+
+/// `disablegrenadesuicide` was called.
+#[derive(Resource)]
+struct GrenadeSuicideDisabled;
+
+/// Each registered client system's state.
+#[derive(Resource, Default)]
+struct ClientSystemStates(BTreeMap<usize, String>);
+
+/// A registered client field's value (`args` 1 names it, 2 is the value).
+fn set_client_field(
+    world: &mut World,
+    pool: &str,
+    owner: u64,
+    args: &[Value],
+) -> Result<Value, String> {
+    let name = string(args, 1)?;
+    let fields = world.get_resource_or_insert_with(ClientFields::default);
+    let field = fields
+        .0
+        .iter()
+        .position(|field| field.pool == pool && field.name == name)
+        .ok_or_else(|| format!("clientfield {name} is not registered for {pool}"))?;
+    let value = if fields.0[field].float {
+        Value::Float(float(args, 2)?)
+    } else {
+        Value::Int(int(args, 2)?)
+    };
+    world
+        .get_resource_or_insert_with(ClientFields::default)
+        .1
+        .insert((pool.to_owned(), owner, field), value);
+    Ok(Value::Undefined)
 }
 
 /// The layout of a zombies player's stats.
