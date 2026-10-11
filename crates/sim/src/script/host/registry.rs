@@ -92,6 +92,14 @@ impl NativeRegistry {
     }
 }
 impl NativeRegistry {
+    /// Black Ops 3's builtins alone: none of the engine services above, which
+    /// serve the other games' rules.
+    pub fn black_ops_3() -> Self {
+        let mut registry = Self(BTreeMap::new());
+        natives::t7::register(&mut registry);
+        registry
+    }
+
     pub fn register(&mut self, namespace: Namespace, name: &str, native: Native) {
         self.0
             .insert((namespace, name.to_ascii_lowercase()), native);
