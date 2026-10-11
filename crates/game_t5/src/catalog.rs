@@ -641,6 +641,7 @@ pub(crate) const T5: &[Builtin] = &[
     Builtin::new(Method, "teleport", Entity, false),
     Builtin::new(Method, "throwbuttonpressed", Entity, false),
     Builtin::new(Method, "traversemode", Entity, false),
+    Builtin::new(Method, "undolaststand", Entity, false),
     Builtin::new(Method, "unlink", Entity, false),
     Builtin::new(Method, "unlinkguidedmissilecamera", Entity, false),
     Builtin::new(Method, "unsetperk", Player, false),

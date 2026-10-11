@@ -161,6 +161,7 @@ const ZOMBIES_MODE: ModeRules = ModeRules {
         "when a dying Black Ops 3 zombies player goes into last stand, and how a downed player moves and sees",
         "Black Ops 3's down rule"
     )),
+    downed: game_api::DownedRules::BRIEFLY_IMMUNE,
     movement: Rule::Unknown(unknown!(
         "t7.movement.player",
         "Black Ops 3's player movement: look, walk, sprint, jump, slide, stances, gravity, collision",

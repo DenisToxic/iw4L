@@ -11,8 +11,8 @@ mod zombie_startup;
 pub use menu_expression::parse_menu_expression;
 
 use game_api::{
-    HudRules, LibraryMode, ModeRules, MovementRules, Rule, ScriptProgram, ScriptRequest,
-    WeaponRules, unknown,
+    DownedRules, HudRules, LibraryMode, ModeRules, MovementRules, Rule, ScriptProgram,
+    ScriptRequest, WeaponRules, unknown,
 };
 
 pub struct T5;
@@ -79,11 +79,20 @@ const ZOMBIE_MODE: ModeRules = ModeRules {
     play_starts_on: "all_players_connected",
     movement: Rule::Known(MovementRules::Game(&movement::ZOMBIES)),
     weapons: Rule::Known(WeaponRules::Game),
-    every_player_downs: Rule::Unknown(unknown!(
-        "t5.match.last_stand",
-        "when a dying Black Ops zombies player goes into last stand, and how a downed player moves and sees",
-        "Black Ops' down rule from its executable or a reference capture (laststand dvars, callback order)"
-    )),
+    // In zombie mode every lethal hit downs the player: the scripts decide
+    // when a downed player dies.
+    every_player_downs: Rule::Known(true),
+    downed: DownedRules {
+        immune_ms: 0,
+        hurt_calls_back: true,
+        sets_view_height: false,
+        revive_restores_health: true,
+        unrun: Some(unknown!(
+            "t5.match.last_stand",
+            "going down or being revived plays no third-person stance animation, does not take the player off a turret or vehicle, and does not mark the client's down time",
+            "Black Ops' last stand and revive animation events in the runtime, its turret and vehicle detach, and what the client's down time field drives"
+        )),
+    },
     spawn_at_default_health: true,
     connect_team: Some("allies"),
     scripts_spawn_players: true,

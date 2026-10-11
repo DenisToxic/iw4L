@@ -92,6 +92,34 @@ pub trait GameScripts: Sync {
     fn config_defaults(&self) -> &'static [(&'static str, &'static str)];
 }
 
+/// What being in last stand does to a player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DownedRules {
+    /// How long a player who just went down takes no damage.
+    pub immune_ms: i64,
+    /// Damage to a downed player leaves their health and raises the last
+    /// stand callback again, instead of killing them.
+    pub hurt_calls_back: bool,
+    /// Going down sets the shared movement's last stand view height.
+    pub sets_view_height: bool,
+    /// A revive gives the player back their max health.
+    pub revive_restores_health: bool,
+    /// What going down or being revived does that is not run.
+    pub unrun: Option<&'static Unknown>,
+}
+
+impl DownedRules {
+    /// A downed player is briefly immune, then dies when hurt; a revive
+    /// leaves their health.
+    pub const BRIEFLY_IMMUNE: Self = Self {
+        immune_ms: 500,
+        hurt_calls_back: false,
+        sets_view_height: true,
+        revive_restores_health: false,
+        unrun: None,
+    };
+}
+
 /// What a game's mode asks of the code around its scripts. Staged for the
 /// match: the simulation reads it from its bootstrap, the HUD as a resource.
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +128,8 @@ pub struct ModeRules {
     pub play_starts_on: &'static str,
     /// Every player goes down into last stand instead of dying.
     pub every_player_downs: Rule<bool>,
+    /// What being down does to a player.
+    pub downed: DownedRules,
     /// Whose player movement (look, walk, jump, stances, gravity, collision)
     /// moves the players.
     pub movement: Rule<MovementRules>,

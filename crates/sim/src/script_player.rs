@@ -322,17 +322,22 @@ pub(crate) fn finish_damage(
     {
         return Finish::Hurt;
     }
+    use playerstate_iw4::pm_flags::LAST_STAND;
+    let downed = downed_rules(world);
     let Some(ps) = world.player_mut(id) else {
         return Finish::Hurt;
     };
     movement_iw4::update_damage_timer(ps, amount, dir);
+    if downed.hurt_calls_back && ps.pm_flags & LAST_STAND != 0 {
+        // A downed player keeps their health; the scripts hear of the hit.
+        return Finish::LastStand;
+    }
     ps.health = (ps.health - amount.max(0)).max(0);
     ps.damage_count = ps.damage_count.saturating_add(1);
     ps.damage_event = ps.damage_event.wrapping_add(1);
     if ps.health > 0 {
         return Finish::Hurt;
     }
-    use playerstate_iw4::pm_flags::LAST_STAND;
     let pistol_death = ps.perks[0] & playerstate_iw4::PERK_PISTOLDEATH != 0;
     let forced = match world
         .bootstrap_ref()
@@ -353,18 +358,49 @@ pub(crate) fn finish_damage(
     if downs && ps.pm_flags & LAST_STAND == 0 {
         ps.health = 1;
         ps.pm_type = playerstate_iw4::PM_TYPE_LAST_STAND;
-        ps.view_height_target = movement_iw4::view_height::LAST_STAND;
+        if downed.sets_view_height {
+            ps.view_height_target = movement_iw4::view_height::LAST_STAND;
+        }
         ps.pm_flags |= LAST_STAND;
+        if let Some(gap) = downed.unrun {
+            diag::info!(Sim, "game gap {}: {}", gap.id, gap.what);
+        }
         return Finish::LastStand;
     }
     Finish::Killed
 }
 
+/// What being down does to a player in this match's mode.
+pub(crate) fn downed_rules(world: &FrameWorld) -> game_api::DownedRules {
+    world
+        .bootstrap_ref()
+        .mode
+        .map_or(game_api::DownedRules::BRIEFLY_IMMUNE, |mode| mode.downed)
+}
+
+/// A downed player back up: with their max health when the mode's revive
+/// gives it back.
 pub(crate) fn revive(world: &mut FrameWorld, id: ClientId) {
+    let downed = downed_rules(world);
+    undo_last_stand(world, id);
+    if let Some(ps) = world.player_mut(id) {
+        if downed.sets_view_height {
+            ps.view_height_target = movement_iw4::view_height::CROUCH;
+        }
+        if downed.revive_restores_health {
+            ps.health = ps.max_health;
+        }
+    }
+    if let Some(gap) = downed.unrun {
+        diag::info!(Sim, "game gap {}: {}", gap.id, gap.what);
+    }
+}
+
+/// A downed player out of last stand, their health left as it is.
+pub(crate) fn undo_last_stand(world: &mut FrameWorld, id: ClientId) {
     if let Some(ps) = world.player_mut(id) {
         ps.pm_type = 0;
         ps.pm_flags &= !playerstate_iw4::pm_flags::LAST_STAND;
-        ps.view_height_target = movement_iw4::view_height::CROUCH;
     }
 }
 
