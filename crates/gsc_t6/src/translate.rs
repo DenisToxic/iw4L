@@ -137,6 +137,7 @@ impl<'a> Translator<'a> {
             Ok((locals - 1 - cached) as u32)
         };
         let mut slots = locals;
+        let mut discard: Option<u32> = None;
         let mut out: Vec<(Location, Op)> = Vec::new();
         let mut pcs: BTreeMap<usize, usize> = BTreeMap::new();
         let mut fixups: Vec<(usize, usize)> = Vec::new();
@@ -384,6 +385,14 @@ impl<'a> Translator<'a> {
                         match Opcode::from_byte(follow.opcode) {
                             Some(Opcode::SafeSetWaittillVariableFieldCached) => {
                                 outputs.push(slot(u8_at(follow))?)
+                            }
+                            // An output the waiter leaves unnamed.
+                            Some(Opcode::SafeDecTop) => {
+                                let discard = *discard.get_or_insert_with(|| {
+                                    slots += 1;
+                                    slots as u32 - 1
+                                });
+                                outputs.push(discard)
                             }
                             Some(Opcode::ClearParams) => {
                                 next += 1;
