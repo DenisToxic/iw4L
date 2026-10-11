@@ -128,6 +128,14 @@ fn frame(
 const MP_CALLBACKS: &str = "maps/mp/gametypes/_callbacksetup::";
 /// Singleplayer and zombie scripts keep the same code callbacks one level up.
 const SP_CALLBACKS: &str = "maps/_callbacksetup::";
+/// Black Ops 3 keeps its code callbacks in one shared module (its executable
+/// looks them up by hash). Only those that take no arguments are found here:
+/// the others' arguments are not Black Ops 3's yet.
+const SHARED_CALLBACKS: &str = "scripts/shared/callbacks_shared::";
+const SHARED_WITHOUT_ARGUMENTS: [&str; 2] = [
+    "codecallback_playerconnect",
+    "codecallback_playerdisconnect",
+];
 
 fn entry(world: &World, name: &str) -> Result<(Arc<Program>, usize, Location), Fault> {
     let location = Location {
@@ -152,6 +160,12 @@ fn entry(world: &World, name: &str) -> Result<(Arc<Program>, usize, Location), F
         .or_else(|| {
             let callback = key.strip_prefix(MP_CALLBACKS)?;
             program.names.get(&format!("{SP_CALLBACKS}{callback}"))
+        })
+        .or_else(|| {
+            let callback = key.strip_prefix(MP_CALLBACKS)?;
+            SHARED_WITHOUT_ARGUMENTS
+                .contains(&callback)
+                .then(|| program.names.get(&format!("{SHARED_CALLBACKS}{callback}")))?
         })
         .ok_or_else(|| Fault::at(&location, "unknown script entry point"))?;
     Ok((program, function, location))
