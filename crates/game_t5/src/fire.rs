@@ -6,6 +6,7 @@
 use fastfile_t5::weapon_def::WeaponDefView;
 use game_api::fire::{
     BulletHitType, BulletImpact, BulletTrace, FireDamage, FireEntity, FireEntityKind, FireWorld,
+    NotifyArg,
 };
 use game_api::movement::{ENTITY_NONE, ENTITY_WORLD, MoveSignal};
 use game_api::{Unknown, unknown};
@@ -33,7 +34,7 @@ mod dflags {
 }
 
 /// The means of death, by number.
-const MEANS: [&str; 21] = [
+pub(crate) const MEANS: [&str; 21] = [
     "MOD_UNKNOWN",
     "MOD_PISTOL_BULLET",
     "MOD_RIFLE_BULLET",
@@ -86,6 +87,10 @@ const HIT_LOCATIONS: [&str; 19] = [
 
 /// `weaponType`: a weapon that fires bullets.
 const WEAPTYPE_BULLET: i32 = 0;
+/// `weaponType`: a projectile weapon.
+const WEAPTYPE_PROJECTILE: i32 = 2;
+/// `weaponClass` of a projectile weapon that launches grenades.
+const WEAPCLASS_GRENADE_LAUNCHER: i32 = 5;
 /// `weaponClass`: a spread weapon, its pellets out to its own range.
 const WEAPCLASS_SPREAD: i32 = 3;
 /// `fireType`: stacked barrels fired together.
@@ -119,7 +124,7 @@ const BULLET_EXTENDED_SEGMENTS: i32 = 12;
 /// crouched to standing.
 const PRONE_EYE: f32 = 11.0;
 const CROUCH_EYE: f32 = 40.0;
-const DEG2RAD: f32 = 0.0174532924;
+pub(crate) const DEG2RAD: f32 = 0.0174532924;
 
 pub(crate) fn fire_unknown() -> &'static Unknown {
     unknown!(
@@ -450,7 +455,11 @@ impl Shot<'_> {
             return;
         }
         let weapon = self.ps.weapon;
-        world.notify(self.attacker(), "weapon_fired", Some(weapon));
+        world.notify(
+            self.attacker(),
+            "weapon_fired",
+            &[NotifyArg::Weapon(weapon)],
+        );
         // The shot's own copy: the world is traced and damaged while the
         // definition is read.
         let Some((def_bytes, variant_bytes)) = world
@@ -473,6 +482,20 @@ impl Shot<'_> {
         let spread = (max - min) * aim_frac + min;
         match def.weapon_type() {
             WEAPTYPE_BULLET => self.bullet_fire(&def, weapon, spread, &parms, time, world),
+            WEAPTYPE_PROJECTILE if def.weapon_class() != WEAPCLASS_GRENADE_LAUNCHER => {
+                crate::missile::fire_rocket(
+                    self.attacker(),
+                    weapon,
+                    &def,
+                    spread,
+                    parms.forward,
+                    parms.right,
+                    parms.up,
+                    parms.muzzle,
+                    world,
+                    self.gaps,
+                );
+            }
             _ => self.gaps.push(fire_unknown()),
         }
     }
@@ -866,7 +889,7 @@ impl Shot<'_> {
                         self.gaps.push(achievement_unknown());
                     }
                     if bp.kills >= dvar(world, "bullet_multikill_shots", 2i32) {
-                        world.notify(attacker, "multikill", None);
+                        world.notify(attacker, "multikill", &[]);
                     }
                 }
             }
@@ -1070,7 +1093,6 @@ impl Shot<'_> {
         }
         ps.weapon
     }
-
 }
 
 /// The server's damage to what a shot, blow or blast reaches: a player's
@@ -1096,7 +1118,11 @@ pub(crate) fn damage(
         bone,
     } = hit;
     if entity.kind == FireEntityKind::Player {
-        if target != attacker && world.entity(attacker).is_some_and(|e| e.kind == FireEntityKind::Player) {
+        if target != attacker
+            && world
+                .entity(attacker)
+                .is_some_and(|e| e.kind == FireEntityKind::Player)
+        {
             gaps.push(player_hit_unknown());
             return;
         }
@@ -1127,7 +1153,9 @@ pub(crate) fn damage(
     {
         return;
     }
-    if entity.kind == FireEntityKind::Actor && !entity.ignore_locational_damage && means != MOD_MELEE
+    if entity.kind == FireEntityKind::Actor
+        && !entity.ignore_locational_damage
+        && means != MOD_MELEE
     {
         let scale = location_multiplier(location, weapon, world);
         let capped = matches!(entity.ai_type, Some("zombie" | "dog"));
@@ -1220,7 +1248,7 @@ fn length_zyx(v: [f32; 3]) -> f32 {
 }
 
 /// The entity number a trace hit: the world for glass, none for nothing.
-fn hit_id(trace: &BulletTrace) -> i32 {
+pub(crate) fn hit_id(trace: &BulletTrace) -> i32 {
     match trace.hit {
         BulletHitType::Entity(n) => n,
         BulletHitType::Glass(_) => ENTITY_WORLD,

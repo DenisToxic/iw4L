@@ -670,6 +670,14 @@ impl PlayerMovement for T5Movement {
         Some(crate::radius::radius_damage(blast, world))
     }
 
+    fn run_missile(
+        &self,
+        missile: &mut game_api::fire::GameMissile,
+        world: &mut dyn game_api::fire::FireWorld,
+    ) -> (game_api::fire::MissileRun, Vec<&'static Unknown>) {
+        crate::missile::run_missile(missile, world)
+    }
+
     fn clear_perks(&self, player: &mut MovePlayer) {
         let (mut ps, mut last) = unpack(player);
         ps.perks = 0;

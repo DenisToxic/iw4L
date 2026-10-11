@@ -323,6 +323,15 @@ pub trait PlayerMovement: Sync {
     ) -> Option<Vec<&'static Unknown>> {
         None
     }
+
+    /// One frame of a missile the game spawned.
+    fn run_missile(
+        &self,
+        _missile: &mut crate::fire::GameMissile,
+        _world: &mut dyn crate::fire::FireWorld,
+    ) -> (crate::fire::MissileRun, Vec<&'static Unknown>) {
+        (crate::fire::MissileRun::Gone, Vec::new())
+    }
 }
 
 /// Whose weapon rules run a match.

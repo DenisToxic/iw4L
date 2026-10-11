@@ -1,6 +1,7 @@
 mod catalog;
 mod fire;
 mod menu_expression;
+mod missile;
 mod movement;
 mod radius;
 mod zombie_catalog;

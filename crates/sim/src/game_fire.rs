@@ -9,7 +9,7 @@ use crate::world::{ClientId, Tick};
 use crate::{ScriptModelId, SimContent};
 use game_api::fire::{
     BulletHitType, BulletImpact, BulletTrace, FireDamage, FireEntity, FireEntityKind, FireTeam,
-    FireWorld,
+    FireWorld, GameMissile, MissileExplosion, MissileRun, NotifyArg,
 };
 use game_api::movement::{ENTITY_NONE, ENTITY_WORLD, GameWeapon};
 use std::collections::HashMap;
@@ -62,6 +62,15 @@ impl<'w, 'a> MatchFireWorld<'w, 'a> {
         self.world.player(id).is_some().then_some(id)
     }
 
+    /// The script object an entity number stands for: a player's, or a
+    /// script entity's (a missile's once scripts adopted it).
+    fn object_of(&mut self, entity: i32) -> Option<u64> {
+        if let Some(client) = self.client(entity) {
+            return crate::script::player_object_id(self.world.ecs(), client.0);
+        }
+        crate::script::object_by_number(self.world.ecs(), entity)
+    }
+
     /// The number the game knows a script entity by.
     fn number_of(&mut self, id: ScriptModelId) -> i32 {
         let number = self.world.gentity_number(id).unwrap_or(ENTITY_NONE);
@@ -102,10 +111,11 @@ impl<'w, 'a> MatchFireWorld<'w, 'a> {
             None => trace.hit = BulletHitType::Entity(ENTITY_WORLD),
             Some(ColliderId::World {
                 surface_flags,
+                contents,
                 glass_encoded,
-                ..
             }) => {
                 trace.surface_flags = surface_flags;
+                trace.contents = contents;
                 trace.hit = match glass_encoded {
                     0 => BulletHitType::Entity(ENTITY_WORLD),
                     encoded => BulletHitType::Glass(i32::from(encoded) - 1),
@@ -414,7 +424,8 @@ impl FireWorld for MatchFireWorld<'_, '_> {
         // Candidates: the game tests each one's own bounds. A body reaches at
         // most this far beyond its origin.
         const REACH: f32 = 128.0;
-        let overlaps = |lo: [f32; 3], hi: [f32; 3]| (0..3).all(|i| lo[i] <= maxs[i] && hi[i] >= mins[i]);
+        let overlaps =
+            |lo: [f32; 3], hi: [f32; 3]| (0..3).all(|i| lo[i] <= maxs[i] && hi[i] >= mins[i]);
         let mut out = Vec::new();
         for id in self.world.client_ids_sorted() {
             let Some(ps) = self.world.player(id) else {
@@ -480,7 +491,10 @@ impl FireWorld for MatchFireWorld<'_, '_> {
 
     fn player(&self, entity: i32) -> Option<game_api::movement::MovePlayer> {
         let id = self.client(entity)?;
-        let frozen = self.world.client_meta(id).is_some_and(|m| m.controls.frozen);
+        let frozen = self
+            .world
+            .client_meta(id)
+            .is_some_and(|m| m.controls.frozen);
         Some(self.world.player(id)?.move_player(id.0 as i32, frozen))
     }
 
@@ -491,12 +505,130 @@ impl FireWorld for MatchFireWorld<'_, '_> {
             .is_some_and(|runtime| runtime.engine.players_ignore_radius_damage)
     }
 
-    fn notify(&mut self, entity: i32, name: &str, weapon: Option<u32>) {
-        let Some(client) = self.client(entity) else {
+    fn notify(&mut self, entity: i32, name: &str, args: &[NotifyArg]) {
+        let receiver = self.object_of(entity);
+        let args: Vec<crate::script::NotifyValue> = args
+            .iter()
+            .map(|arg| match *arg {
+                NotifyArg::Weapon(w) => crate::script::NotifyValue::String(
+                    crate::script_player::weapon_name(self.world, w),
+                ),
+                NotifyArg::Entity(e) => crate::script::NotifyValue::Entity(self.object_of(e)),
+                NotifyArg::Vector(v) => crate::script::NotifyValue::Vector(v),
+                NotifyArg::Float(f) => crate::script::NotifyValue::Float(f),
+                NotifyArg::Int(n) => crate::script::NotifyValue::Int(n),
+            })
+            .collect();
+        if let Some(receiver) = receiver {
+            crate::script::notify_entity(self.world.ecs(), receiver, name, &args);
+        }
+    }
+
+    fn map_center(&self) -> [f32; 3] {
+        self.world
+            .ecs_ref()
+            .get_resource::<crate::script::RoundScript>()
+            .map_or([0.0; 3], |runtime| runtime.engine.map_center)
+    }
+
+    fn point_contents(&mut self, point: [f32; 3], mask: u32) -> u32 {
+        let outcome = crate::bullet_collision::bullet_trace_with_entity_models(
+            self.world.clip_brushes(),
+            self.world.clip_bsp(),
+            self.world.clip_cmodels(),
+            self.world.clip_mesh(),
+            &[],
+            &[],
+            &BulletTraceQuery {
+                start: point,
+                end: point,
+                mask,
+                ignore: None,
+                ignore_hit: None,
+                ignore_model: None,
+            },
+            &|_| true,
+        );
+        match outcome {
+            TraceOutcome::StartSolid {
+                collider: Some(ColliderId::World { contents, .. }),
+                ..
+            } => contents & mask,
+            _ => 0,
+        }
+    }
+
+    fn spawn_missile(&mut self, mut missile: GameMissile) -> Option<i32> {
+        let owner = self.client(missile.owner)?;
+        let owner_life = self.world.client_meta(owner)?.life_sequence;
+        let id = self.world.allocate_projectile_id();
+        let entnum = match self
+            .world
+            .allocate_dynamic_entity(crate::gentity::EntityRunKind::Missile)
+        {
+            Ok(entity) => entity.number(),
+            Err(error) => {
+                diag::warn!(Sim, "game missile not spawned: {error:?}");
+                return None;
+            }
+        };
+        missile.entity = entnum;
+        let time = crate::corpse::level_time_ms(self.tick);
+        let pos = crate::equipment::game_trajectory(&missile.position);
+        self.world.push_projectile(crate::ProjectileState {
+            id,
+            owner,
+            owner_life,
+            weapon: missile.weapon,
+            origin: missile.origin,
+            velocity: missile.position.delta,
+            pos,
+            apos: crate::equipment::game_trajectory(&missile.angles),
+            entnum,
+            launch_time: missile.visible_at,
+            spawn_time_ms: time,
+            detonate_at_ms: None,
+            cleanup_at_ms: i32::MAX,
+            travel_distance: 0.0,
+            live: true,
+            detonation_armed: false,
+            stuck_pane: None,
+            grounded: false,
+            guide: crate::MissileGuide::default(),
+            attached_to: None,
+        });
+        self.world
+            .ecs()
+            .get_resource_or_insert_with(GameMissiles::default)
+            .0
+            .insert(entnum, missile);
+        Some(entnum)
+    }
+
+    fn push_player(&mut self, entity: i32, velocity: [f32; 3]) {
+        let Some(id) = self.client(entity) else {
             return;
         };
-        let weapon = weapon.map(|w| crate::script_player::weapon_name(self.world, w));
-        crate::script::notify_player(self.world.ecs(), client.0, name, weapon.as_deref());
+        if let Some(ps) = self.world.player_mut(id) {
+            for (v, add) in ps.velocity.iter_mut().zip(velocity) {
+                *v += add;
+            }
+        }
+    }
+
+    fn explosion(&mut self, explosion: &MissileExplosion) {
+        let Some(projectile) = self.world.projectile_by_number(explosion.missile) else {
+            return;
+        };
+        crate::equipment::push_explosion_event(
+            self.world,
+            self.tick,
+            &projectile,
+            explosion.origin,
+            explosion.normal,
+            explosion.surface_type,
+            false,
+        );
     }
 }
 
@@ -536,6 +668,68 @@ pub(crate) fn script_blast(
     };
     for gap in gaps {
         world.report_game_gap(gap);
+    }
+    true
+}
+
+/// The missiles a game's rules run, by entity number.
+#[derive(bevy_ecs::prelude::Resource, Default)]
+pub(crate) struct GameMissiles(std::collections::BTreeMap<i32, GameMissile>);
+
+/// A frame of a missile the game spawned; false when the missile is the
+/// runtime's own.
+pub(crate) fn think_game_missile(world: &mut FrameWorld, tick: Tick, entnum: i32) -> bool {
+    if !crate::game_move::game_weapons(world) {
+        return false;
+    }
+    // Under the game's weapon rules every missile is the game's; one the
+    // match does not run here (a client's copy) flies on its trajectory.
+    let Some(mut missile) = world
+        .ecs()
+        .get_resource::<GameMissiles>()
+        .and_then(|missiles| missiles.0.get(&entnum).copied())
+    else {
+        return true;
+    };
+    let Some(movement) = crate::game_move::rules(world) else {
+        return false;
+    };
+    let owner = u32::try_from(missile.owner).ok().map(ClientId);
+    let (run, gaps) = {
+        let mut around = MatchFireWorld::new(world, tick, owner);
+        movement.run_missile(&mut missile, &mut around)
+    };
+    for gap in gaps {
+        world.report_game_gap(gap);
+    }
+    match run {
+        MissileRun::Flying => {
+            if let Some(projectile) = world.projectile_mut_by_number(entnum) {
+                projectile.origin = missile.origin;
+                projectile.pos = crate::equipment::game_trajectory(&missile.position);
+                projectile.apos = crate::equipment::game_trajectory(&missile.angles);
+                projectile.velocity = missile.position.delta;
+            }
+            if let Some(mut missiles) = world.ecs().get_resource_mut::<GameMissiles>() {
+                missiles.0.insert(entnum, missile);
+            }
+        }
+        MissileRun::Exploded(_) | MissileRun::Gone => {
+            if let Some(mut missiles) = world.ecs().get_resource_mut::<GameMissiles>() {
+                missiles.0.remove(&entnum);
+            }
+            if let MissileRun::Exploded(origin) = run
+                && let Some(projectile) = world.projectile_by_number(entnum)
+            {
+                world
+                    .weapon_notes
+                    .push(crate::equipment::WeaponNote::Detonated {
+                        id: projectile.id,
+                        origin,
+                    });
+            }
+            let _ = world.despawn_projectile(entnum);
+        }
     }
     true
 }
