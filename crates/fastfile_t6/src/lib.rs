@@ -17,6 +17,7 @@ mod walk;
 pub mod weapon;
 pub mod weapon_camo;
 pub mod world;
+pub mod zbarrier;
 
 pub use asset_type::AssetType;
 pub use cipher::{STREAM_COUNT, ZoneCipher};

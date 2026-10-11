@@ -96,5 +96,36 @@ fn scripts(content: &[u8]) -> asset_core::ZoneScripts {
             });
         }
     }
+    let anim = |anim: Option<fastfile_t6::zbarrier::BarrierAnim>| {
+        anim.map(|anim| asset_core::BarrierAnim {
+            name: anim.name,
+            timing: anim.timing,
+        })
+    };
+    for barrier in load.barriers() {
+        out.barriers.push(asset_core::BarrierType {
+            name: barrier.name,
+            piece_count: barrier.piece_count,
+            auto_hide_open_pieces: barrier.auto_hide_open_pieces,
+            taunts: barrier.taunts,
+            reach_through_attacks: barrier.reach_through_attacks,
+            taunt_anim_state: barrier.taunt_anim_state,
+            reach_through_anim_state: barrier.reach_through_anim_state,
+            attack_slots: barrier.attack_slots,
+            attack_slot_horz_offset: barrier.attack_slot_horz_offset,
+            pieces: barrier
+                .pieces
+                .into_iter()
+                .map(|piece| asset_core::BarrierPiece {
+                    models: piece.models,
+                    open_anim: anim(piece.tear_anim),
+                    close_anim: anim(piece.board_anim),
+                    anim_state: piece.anim_state,
+                    anim_substate: piece.anim_substate,
+                    upgraded_lives: piece.upgraded_lives,
+                })
+                .collect(),
+        });
+    }
     out
 }

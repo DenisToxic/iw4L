@@ -9,6 +9,8 @@ use crate::script::{ArrayKey, Namespace, NativeRegistry, RoundScript, Value};
 use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 
+mod barrier;
+
 /// How Black Ops 2 finds a dvar: djb2 over the lowercased name.
 fn dvar_hash(name: &str) -> u32 {
     name.bytes().fold(5381u32, |hash, byte| {
@@ -858,9 +860,10 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         });
         Ok(Value::Int(row.map_or(-1, |row| row as i32)))
     });
-    // The games log, the online counters and the demo camera are outside the
-    // match.
+    // Black Ops 2's logstring handler is empty, as function and as method.
     registry.register(Function, "logstring", |_, _, _| Ok(Value::Undefined));
+    registry.register(Method, "logstring", |_, _, _| Ok(Value::Undefined));
+    // The online counters and the demo camera are outside the match.
     registry.register(Function, "incrementcounter", |_, _, args| {
         string(args, 0)?;
         int(args, 1)?;
@@ -1614,6 +1617,8 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         (Method, "usebuttonpressed"),
         (Method, "getplayerangles"),
         (Function, "isalive"),
+        // An entity object with a client.
+        (Function, "isplayer"),
         (Function, "newclienthudelem"),
         (Method, "setdepthoffield"),
         (Method, "stopshellshock"),
@@ -1677,6 +1682,7 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             registry.register(namespace, name, native);
         }
     }
+    barrier::register(registry);
 }
 
 /// The node field a node lookup key names; it has to hold a string.

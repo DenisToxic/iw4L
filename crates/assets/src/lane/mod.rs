@@ -468,5 +468,8 @@ pub(crate) fn capture_script_zones(
         for layout in found.layouts {
             scripts.capture_layout(layout);
         }
+        for barrier in found.barriers {
+            scripts.capture_barrier(barrier);
+        }
     }
 }
