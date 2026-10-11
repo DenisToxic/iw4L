@@ -1116,6 +1116,7 @@ fn capture_weapon_icons(
             if asset.ty != fastfile_t6::AssetType::Material {
                 continue;
             }
+            // `,name` is a header-only reference; the zone defining it is read too.
             let Some(name) = header_str(load, &asset.header, 0)
                 .filter(|name| !name.starts_with(','))
                 .map(str::to_ascii_lowercase)

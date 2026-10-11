@@ -10,8 +10,9 @@
 //! * patterns — outside game/format crates, no code names a game: game enum
 //!   variants, `GameModeKind::Zombies`, a game crate's path, a game literal,
 //!   `is_<game>` helpers. The session's registration point is the exception;
-//! * ledger — every `unknown!("<id>", ..)` in a game crate is listed in
-//!   `docs/fidelity/<game>.md`;
+//! * ledger — every `unknown!("<id>", ..)` in a game crate, and every id that
+//!   starts an error string (`"t6.weapons.table_full: …"`) in any crate, is
+//!   listed in `docs/fidelity/<game>.md` of the game the id names;
 //! * ownership — every game has its own game crate (`game_<game>`, answering
 //!   every `game_api` trait) and its own format crate, and the registration
 //!   answers a game only with that game's crates. A rule lent from another
@@ -34,6 +35,8 @@ const REGISTRATION: &str = "crates/session/src/games.rs";
 const IDENTITY: &str = "crates/asset_core/src/family.rs";
 /// This check has to spell the shapes it hunts for.
 const SELF: &str = "xtask/src/boundary.rs";
+/// The ledger guard names the game whose crates every game shares.
+const LEDGER_GUARD: &str = "xtask/src/ledger_guard.rs";
 const GAMES: [&str; 5] = ["iw4", "t5", "iw5", "t6", "t7"];
 const GAME_VARIANTS: [&str; 5] = ["Iw4", "T5", "Iw5", "T6", "T7"];
 const GAME_ENUMS: [&str; 4] = ["ZoneGame", "AssetNamespace", "FamilyId", "Realm"];
@@ -157,20 +160,30 @@ pub fn run_cli(root: &Path, args: &[String]) -> Res<()> {
             let Ok(text) = std::fs::read_to_string(&file) else {
                 continue;
             };
-            match package.layer {
-                Some(Layer::Game) => {
-                    let game = package.game.as_deref().unwrap_or("?");
-                    for id in unknown_ids_in(&text) {
-                        unknown_ids += 1;
-                        if !ledger_lists(root, game, &id) {
-                            errors.push(format!(
-                                "{rel}: unknown!(\"{id}\") is not in docs/fidelity/{game}.md"
-                            ));
-                        }
+            if rel != SELF {
+                let mut ids = error_ids_in(&text);
+                if package.layer == Some(Layer::Game) {
+                    ids.extend(unknown_ids_in(&text));
+                }
+                for id in ids {
+                    unknown_ids += 1;
+                    let game = GAMES
+                        .iter()
+                        .copied()
+                        .find(|g| id.strip_prefix(g).is_some_and(|r| r.starts_with('.')))
+                        .or(package.game.as_deref())
+                        .unwrap_or("?");
+                    if !ledger_lists(root, game, &id) {
+                        errors.push(format!(
+                            "{rel}: ledger id `{id}` is not in docs/fidelity/{game}.md"
+                        ));
                     }
                 }
-                Some(Layer::Format) | None => {}
-                Some(_) if [REGISTRATION, IDENTITY, SELF].contains(&rel.as_str()) => {}
+            }
+            match package.layer {
+                Some(Layer::Game | Layer::Format) | None => {}
+                Some(_) if [REGISTRATION, IDENTITY, SELF, LEDGER_GUARD].contains(&rel.as_str()) => {
+                }
                 Some(_) => {
                     for (shape, count) in game_shapes(&text, &game_idents) {
                         findings.insert(format!("pattern {rel} {shape}"), count);
@@ -290,7 +303,9 @@ fn summary(packages: &[Package], findings: &Findings, unknown_ids: usize) {
         "  (b) patterns: {total} game checks outside game crates: {}",
         ranked.join(", ")
     );
-    println!("  (c) ledger: {unknown_ids} unknown!() ids in game crates");
+    println!(
+        "  (c) ledger: {unknown_ids} ids (unknown!() in game crates, `<id>: …` errors anywhere)"
+    );
 }
 
 fn workspace(root: &Path) -> Res<Vec<Package>> {
@@ -447,6 +462,31 @@ fn unknown_ids_in(text: &str) -> Vec<String> {
             Some(rest[..rest.find('"')?].to_owned())
         })
         .collect()
+}
+
+/// Ids that open a string literal as `"<game>.<area>.<rule>: …"`.
+fn error_ids_in(text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    for line in text.lines().map(code_of) {
+        for (at, _) in line.match_indices('"') {
+            let rest = &line[at + 1..];
+            let len = rest
+                .find(|c: char| {
+                    !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.')
+                })
+                .unwrap_or(rest.len());
+            let (id, after) = rest.split_at(len);
+            let named = GAMES.iter().any(|g| {
+                id.strip_prefix(g)
+                    .and_then(|r| r.strip_prefix('.'))
+                    .is_some_and(|r| !r.is_empty() && !r.ends_with('.'))
+            });
+            if named && after.starts_with(':') {
+                ids.push(id.to_owned());
+            }
+        }
+    }
+    ids
 }
 
 fn ledger_lists(root: &Path, game: &str, id: &str) -> bool {
