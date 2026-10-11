@@ -14,6 +14,16 @@ use std::collections::BTreeMap;
 #[derive(Resource, Default)]
 pub struct GametypeSettings(pub BTreeMap<String, String>);
 
+/// What the scripts set for the match that IW4L does not act on yet: the
+/// scoreboard's columns, match flag bits, the navigation clearance ceiling.
+#[derive(Resource, Default)]
+pub(crate) struct MatchState {
+    pub(crate) scoreboard_columns: Vec<String>,
+    pub(crate) flags: BTreeMap<String, i32>,
+    pub(crate) talk_flags: BTreeMap<String, String>,
+    pub(crate) clearance_ceiling: Option<f32>,
+}
+
 /// The client fields the scripts registered: pool and name → bits and type.
 #[derive(Resource, Default)]
 pub(crate) struct ClientFields(BTreeMap<(String, String), (i32, String)>);
@@ -140,6 +150,48 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             .next()
             .map_or(Value::Undefined, |(k, _)| key_value(k)))
     });
+    // "combine two arrays into and returns one new array": duplicates pruned
+    // unless <allowdupes>; string keys kept with <preserve_keys>, the rest
+    // renumbered (in key order: IW4L's choice).
+    registry.register(Function, "arraycombine", |world, _, args| {
+        let first = array(world, arg(args, 0)?)?;
+        let second = array(world, arg(args, 1)?)?;
+        let allow_dupes = truth(arg(args, 2)?);
+        let preserve = truth(arg(args, 3)?);
+        let mut out: BTreeMap<ArrayKey, Value> = BTreeMap::new();
+        let mut next = 0;
+        for (key, value) in first.iter().chain(second.iter()) {
+            if !allow_dupes && out.values().any(|v| v == value) {
+                continue;
+            }
+            match key {
+                ArrayKey::String(_) if preserve => {
+                    out.insert(key.clone(), value.clone());
+                }
+                _ => {
+                    out.insert(ArrayKey::Integer(next), value.clone());
+                    next += 1;
+                }
+            }
+        }
+        new_keyed_array(world, out)
+    });
+    // "Remove a value from an array (may affect multiple indexes)";
+    // [preserve_keys] "otherwise creates integer keys".
+    registry.register(Function, "arrayremovevalue", |world, _, args| {
+        let values = array(world, arg(args, 0)?)?;
+        let removed = arg(args, 1)?;
+        let preserve = args.get(2).is_some_and(truth);
+        let kept = values.into_iter().filter(|(_, v)| v != removed);
+        let out: BTreeMap<ArrayKey, Value> = if preserve {
+            kept.collect()
+        } else {
+            kept.enumerate()
+                .map(|(i, (_, v))| (ArrayKey::Integer(i as i32), v))
+                .collect()
+        };
+        new_keyed_array(world, out)
+    });
     registry.register(Function, "arraycopy", |world, _, args| {
         let values = array(world, arg(args, 0)?)?;
         new_keyed_array(world, values)
@@ -158,6 +210,8 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     registry.register(Function, "isvec", |_, _, args| {
         Ok(Value::Int(matches!(arg(args, 0)?, Value::Vector(_)).into()))
     });
+    // No weapon object exists yet: Black Ops 3's weapon assets are not read.
+    registry.register(Function, "isweapon", |_, _, _| Ok(Value::Int(0)));
     registry.register(Function, "isfunctionptr", |_, _, args| {
         Ok(Value::Int(
             matches!(arg(args, 0)?, Value::Function(_) | Value::Builtin(_)).into(),
@@ -272,6 +326,48 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             },
         );
     }
+
+    // A match IW4L hosts is never split screen and does not rank players
+    // (IW4L's choice: neither builtin is in the reference).
+    registry.register(Function, "issplitscreen", |_, _, _| Ok(Value::Int(0)));
+    registry.register(Function, "gamemodeisusingxp", |_, _, _| Ok(Value::Int(0)));
+    // "Set the scoreboard columns", "Flags a bit in the match state", "Sets a
+    // new clearance ceiling": recorded; nothing reads them yet.
+    registry.register(Function, "setscoreboardcolumns", |world, _, args| {
+        let columns = (0..args.len())
+            .map(|i| string(args, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .scoreboard_columns = columns;
+        Ok(Value::Undefined)
+    });
+    // The scripts name the bit (`SetMatchFlag( "disableIngameMenu", 1 )`).
+    registry.register(Function, "setmatchflag", |world, _, args| {
+        let (bit, value) = (string(args, 0)?, int(args, 1)?);
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .flags
+            .insert(bit, value);
+        Ok(Value::Undefined)
+    });
+    // "Flags a bit in the match talk state": `SetMatchTalkFlag(
+    // "DeadChatWithDead", "1" )`.
+    registry.register(Function, "setmatchtalkflag", |world, _, args| {
+        let (bit, value) = (string(args, 0)?, string(args, 1)?);
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .talk_flags
+            .insert(bit, value);
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "setclearanceceiling", |world, _, args| {
+        let ceiling = float(args, 0)?;
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .clearance_ceiling = Some(ceiling);
+        Ok(Value::Undefined)
+    });
 
     // Client fields: "Register a client field" from a pool ("world",
     // "actor", "vehicle", "scriptmover", …) with 1-32 bits, "int" or "float".
@@ -440,6 +536,18 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             [v[0] / l, v[1] / l, v[2] / l]
         }))
     });
+    // Forward, right and up of pitch, yaw, roll in degrees (the engine
+    // family's angle convention: IW4L's reading, the reference only names
+    // them).
+    registry.register(Function, "anglestoforward", |_, _, args| {
+        Ok(Value::Vector(angle_vectors(vector(args, 0)?)[0]))
+    });
+    registry.register(Function, "anglestoright", |_, _, args| {
+        Ok(Value::Vector(angle_vectors(vector(args, 0)?)[1]))
+    });
+    registry.register(Function, "anglestoup", |_, _, args| {
+        Ok(Value::Vector(angle_vectors(vector(args, 0)?)[2]))
+    });
     registry.register(Function, "vectorlerp", |_, _, args| {
         let (a, b, t) = (vector(args, 0)?, vector(args, 1)?, float(args, 2)?);
         Ok(Value::Vector(std::array::from_fn(|i| {
@@ -557,4 +665,26 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
 
 fn length(v: [f32; 3]) -> f32 {
     dot(v, v).sqrt()
+}
+
+fn truth(value: &Value) -> bool {
+    match value {
+        Value::Undefined => false,
+        Value::Int(n) => *n != 0,
+        Value::Float(n) => *n != 0.0,
+        _ => true,
+    }
+}
+
+/// Forward, right and up for pitch, yaw, roll in degrees.
+fn angle_vectors(angles: [f32; 3]) -> [[f32; 3]; 3] {
+    let [pitch, yaw, roll] = angles.map(f32::to_radians);
+    let (sp, cp) = pitch.sin_cos();
+    let (sy, cy) = yaw.sin_cos();
+    let (sr, cr) = roll.sin_cos();
+    [
+        [cp * cy, cp * sy, -sp],
+        [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp],
+        [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp],
+    ]
 }
