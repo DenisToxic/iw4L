@@ -86,21 +86,7 @@ pub struct RawFile<'z> {
 }
 
 pub fn raw_file<'z>(load: &'z ZoneLoad, asset: &crate::LoadedAsset) -> Option<RawFile<'z>> {
-    if asset.ty != AssetType::RawFile {
-        return None;
-    }
-    let word = |at: usize| {
-        asset
-            .header
-            .get(at..at + 4)
-            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
-    };
-    let name = decode_ptr(word(NAME)?)
-        .and_then(|at| load.blocks.cstr(at).ok())
-        .and_then(|bytes| core::str::from_utf8(bytes).ok())?;
-    let bytes =
-        decode_ptr(word(BUFFER)?).and_then(|at| load.blocks.bytes(at, word(LEN)? as usize).ok())?;
-    Some(RawFile { name, bytes })
+    crate::read_raw_file(load, asset).ok().flatten()
 }
 
 /// A string table (`StringTable`): its name and cells, row by row.

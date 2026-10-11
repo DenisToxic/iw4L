@@ -1,0 +1,558 @@
+pub mod library;
+pub mod runtime;
+pub mod tables;
+
+use fastfile_t6::hks::{self, Constant, Instruction};
+use std::sync::Arc;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Nil,
+    Boolean(u32),
+    Number(f32),
+    Bytes(Arc<[u8]>),
+    Hash(u64),
+    Reference { kind: u8, identity: u32 },
+}
+
+impl Value {
+    pub fn truthy(&self) -> bool {
+        !matches!(self, Self::Nil | Self::Boolean(0))
+    }
+}
+
+impl From<Constant> for Value {
+    fn from(value: Constant) -> Self {
+        match value {
+            Constant::Nil => Self::Nil,
+            Constant::Boolean(value) => Self::Boolean(u32::from(value)),
+            Constant::Number(value) => Self::Number(value),
+            Constant::String(value) => Self::Bytes(Arc::from(value)),
+            Constant::Hash(value) => Self::Hash(value),
+        }
+    }
+}
+
+pub trait Environment {
+    fn global(&mut self, key: &Value) -> Result<Value, FaultKind>;
+    fn field(&mut self, container: &Value, key: &Value) -> Result<Value, FaultKind>;
+    fn new_table(&mut self) -> Result<Value, FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn set_global(&mut self, _key: &Value, _value: Value) -> Result<(), FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn set_field(
+        &mut self,
+        _container: &Value,
+        _key: &Value,
+        _value: Value,
+    ) -> Result<(), FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn child_upvalues(&self, _child: usize) -> Result<usize, FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn closure(&mut self, _child: usize, _captures: &[Capture]) -> Result<Value, FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn upvalue(&self, _slot: usize) -> Result<Value, FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn set_upvalue(&mut self, _slot: usize, _value: Value) -> Result<(), FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+    fn close(&mut self, _first: usize, _registers: &[Value]) -> Result<(), FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+}
+
+struct Unbound;
+
+impl Environment for Unbound {
+    fn global(&mut self, _key: &Value) -> Result<Value, FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+
+    fn field(&mut self, _container: &Value, _key: &Value) -> Result<Value, FaultKind> {
+        Err(FaultKind::BindingRequired)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Program {
+    pub functions: Vec<Function>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Function {
+    pub upvalues: usize,
+    pub parameters: usize,
+    pub varargs: u8,
+    pub registers: usize,
+    pub instructions: Vec<Instruction>,
+    pub constants: Vec<Value>,
+    pub children: Vec<usize>,
+}
+
+impl From<hks::Function> for Function {
+    fn from(function: hks::Function) -> Self {
+        Self {
+            upvalues: function.upvalues as usize,
+            parameters: function.parameters as usize,
+            varargs: function.varargs,
+            registers: function.registers as usize,
+            instructions: function.instructions,
+            constants: function.constants.into_iter().map(Value::from).collect(),
+            children: function.children,
+        }
+    }
+}
+
+impl From<hks::Chunk> for Program {
+    fn from(chunk: hks::Chunk) -> Self {
+        Self {
+            functions: chunk.functions.into_iter().map(Function::from).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Frame {
+    pub registers: Vec<Value>,
+    pub cached: Value,
+    pub pc: usize,
+    pub top: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Step {
+    Continue,
+    Returned(Vec<Value>),
+    Call {
+        callee: Value,
+        arguments: Vec<Value>,
+        register: usize,
+        results: Option<usize>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capture {
+    Register(usize),
+    Upvalue(usize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Fault {
+    pub pc: usize,
+    pub kind: FaultKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FaultKind {
+    ProgramCounter,
+    Register(usize),
+    Constant(usize),
+    NumberRequired,
+    ComparisonRequired,
+    BindingRequired,
+    Argument(usize),
+    ProtectedMetatable,
+    ScriptError(Vec<u8>),
+    Table(u32),
+    Userdata(u32),
+    KeyRequired,
+    NilKey,
+    NanKey,
+    IndexChain,
+    Capacity,
+    Function(usize),
+    Upvalue(usize),
+    Capture(usize),
+    Opcode(u8),
+    Branch(isize),
+    Budget,
+}
+
+impl Frame {
+    fn fault(&self, kind: FaultKind) -> Fault {
+        Fault { pc: self.pc, kind }
+    }
+
+    fn register(&self, index: usize) -> Result<Value, Fault> {
+        self.registers
+            .get(index)
+            .cloned()
+            .ok_or_else(|| self.fault(FaultKind::Register(index)))
+    }
+
+    fn store(&mut self, index: usize, value: Value) -> Result<(), Fault> {
+        let fault = self.fault(FaultKind::Register(index));
+        *self.registers.get_mut(index).ok_or(fault)? = value;
+        Ok(())
+    }
+
+    fn constant(&self, function: &Function, index: usize) -> Result<Value, Fault> {
+        function
+            .constants
+            .get(index)
+            .cloned()
+            .ok_or_else(|| self.fault(FaultKind::Constant(index)))
+    }
+
+    fn operand(&self, function: &Function, index: usize) -> Result<Value, Fault> {
+        if index < 256 {
+            self.register(index)
+        } else {
+            self.constant(function, index & 255)
+        }
+    }
+
+    fn number(&self, value: Value) -> Result<f32, Fault> {
+        match value {
+            Value::Number(value) => Ok(value),
+            _ => Err(self.fault(FaultKind::NumberRequired)),
+        }
+    }
+
+    fn equal(&self, left: &Value, right: &Value) -> Result<bool, Fault> {
+        match (left, right) {
+            (Value::Nil, Value::Nil) => Ok(true),
+            (Value::Boolean(left), Value::Boolean(right)) => Ok(left == right),
+            (Value::Number(left), Value::Number(right)) => Ok(left == right),
+            (Value::Bytes(left), Value::Bytes(right)) => Ok(left == right),
+            (
+                Value::Reference {
+                    kind: left_kind,
+                    identity: left,
+                },
+                Value::Reference {
+                    kind: right_kind,
+                    identity: right,
+                },
+            ) => {
+                if left_kind != right_kind {
+                    Ok(false)
+                } else if left == right {
+                    Ok(true)
+                } else if matches!(left_kind, 5 | 7) {
+                    Err(self.fault(FaultKind::ComparisonRequired))
+                } else {
+                    Ok(false)
+                }
+            }
+            (Value::Hash(_), _) | (_, Value::Hash(_)) => {
+                Err(self.fault(FaultKind::ComparisonRequired))
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn branch(&self, function: &Function, offset: isize) -> Result<usize, Fault> {
+        let target = self.pc as isize + offset;
+        if target < 0 || target as usize > function.instructions.len() {
+            Err(self.fault(FaultKind::Branch(target)))
+        } else {
+            Ok(target as usize)
+        }
+    }
+
+    fn conditional(&self, function: &Function, taken: bool) -> Result<usize, Fault> {
+        if taken {
+            let jump = function
+                .instructions
+                .get(self.pc + 1)
+                .ok_or_else(|| self.fault(FaultKind::ProgramCounter))?;
+            self.branch(function, ((jump.0 >> 8) & 0x1ffff) as isize - 65535 + 2)
+        } else {
+            self.branch(function, 2)
+        }
+    }
+
+    pub fn step(&mut self, function: &Function) -> Result<Step, Fault> {
+        self.step_with(function, &mut Unbound)
+    }
+
+    pub fn step_with(
+        &mut self,
+        function: &Function,
+        environment: &mut dyn Environment,
+    ) -> Result<Step, Fault> {
+        let instruction = function
+            .instructions
+            .get(self.pc)
+            .ok_or_else(|| self.fault(FaultKind::ProgramCounter))?
+            .0;
+        let opcode = (instruction >> 25) as u8;
+        let a = (instruction & 255) as usize;
+        let b = ((instruction >> 17) & 255) as usize;
+        let c = ((instruction >> 8) & 511) as usize;
+        let mut next = self.pc + 1;
+        let mut result = Step::Continue;
+        match opcode {
+            2 | 3 | 29 | 30 | 69 => {
+                let callee = if opcode == 69 {
+                    self.cached.clone()
+                } else {
+                    self.register(a)?
+                };
+                if !matches!(callee, Value::Reference { kind: 9 | 10, .. }) {
+                    return Err(self.fault(FaultKind::BindingRequired));
+                }
+                let end = if b == 0 { self.top } else { a + b };
+                let arguments = self
+                    .registers
+                    .get(a + 1..end)
+                    .ok_or_else(|| self.fault(FaultKind::Register(end)))?
+                    .to_vec();
+                if opcode == 2 || matches!(callee, Value::Reference { kind: 9, .. }) {
+                    self.cached = callee.clone();
+                }
+                result = Step::Call {
+                    callee,
+                    arguments,
+                    register: a,
+                    results: (c & 255).checked_sub(1),
+                };
+            }
+            38 => {
+                let value = environment.upvalue(b).map_err(|kind| self.fault(kind))?;
+                self.store(a, value.clone())?;
+                self.cached = value;
+            }
+            39 | 70 => {
+                let value = if opcode == 39 {
+                    self.register(a)?
+                } else {
+                    self.cached.clone()
+                };
+                environment
+                    .set_upvalue(b, value.clone())
+                    .map_err(|kind| self.fault(kind))?;
+                self.cached = value;
+            }
+            65 => {
+                if a > self.registers.len() {
+                    return Err(self.fault(FaultKind::Register(a)));
+                }
+                environment
+                    .close(a, &self.registers)
+                    .map_err(|kind| self.fault(kind))?;
+            }
+            66 => {
+                let child = ((instruction >> 8) & 0x1ffff) as usize;
+                let count = environment
+                    .child_upvalues(child)
+                    .map_err(|kind| self.fault(kind))?;
+                let end = next
+                    .checked_add(count)
+                    .ok_or_else(|| self.fault(FaultKind::ProgramCounter))?;
+                let data = function
+                    .instructions
+                    .get(next..end)
+                    .ok_or_else(|| self.fault(FaultKind::ProgramCounter))?;
+                let mut captures = Vec::with_capacity(count);
+                for data in data {
+                    let index = ((data.0 >> 8) & 0x1ffff) as usize;
+                    let capture = if data.0 & 255 == 1 {
+                        self.register(index)?;
+                        Capture::Register(index)
+                    } else {
+                        Capture::Upvalue(index)
+                    };
+                    captures.push(capture);
+                }
+                let value = environment
+                    .closure(child, &captures)
+                    .map_err(|kind| self.fault(kind))?;
+                self.store(a, value)?;
+                next = end;
+            }
+            0 | 73 => {
+                let container = if opcode == 0 {
+                    self.register(b)?
+                } else {
+                    self.cached.clone()
+                };
+                let key = self.constant(function, c & 255)?;
+                next = self.branch(function, 3)?;
+                let value = environment
+                    .field(&container, &key)
+                    .map_err(|kind| self.fault(kind))?;
+                self.store(a, value.clone())?;
+                self.cached = value;
+            }
+            6 | 91 => {
+                let key = self.constant(function, ((instruction >> 8) & 0x1ffff) as usize)?;
+                let value = environment.global(&key).map_err(|kind| self.fault(kind))?;
+                self.store(a, value.clone())?;
+                self.cached = value;
+            }
+            8 | 10..=12 => {
+                let container = self.register(b)?;
+                let key = self.operand(function, c)?;
+                if opcode == 8 && !matches!(key, Value::Bytes(_)) {
+                    return Err(self.fault(FaultKind::BindingRequired));
+                }
+                next = self.branch(function, if opcode == 8 { 1 } else { 3 })?;
+                let value = environment
+                    .field(&container, &key)
+                    .map_err(|kind| self.fault(kind))?;
+                if opcode == 8 {
+                    self.store(a + 1, container)?;
+                    self.cached = value.clone();
+                }
+                self.store(a, value)?;
+            }
+            15 | 74 => {
+                let container = if opcode == 15 {
+                    self.register(a)?
+                } else {
+                    self.cached.clone()
+                };
+                let key = self.constant(function, b)?;
+                let value = self.operand(function, c)?;
+                environment
+                    .set_field(&container, &key, value)
+                    .map_err(|kind| self.fault(kind))?;
+                self.cached = container;
+            }
+            16..=21 => {
+                let container = self.register(a)?;
+                let key = self.operand(function, ((instruction >> 17) & 511) as usize)?;
+                let value = self.operand(function, c)?;
+                environment
+                    .set_field(&container, &key, value)
+                    .map_err(|kind| self.fault(kind))?;
+            }
+            27 => {
+                let key = self.constant(function, ((instruction >> 8) & 0x1ffff) as usize)?;
+                let value = self.register(a)?;
+                environment
+                    .set_global(&key, value)
+                    .map_err(|kind| self.fault(kind))?;
+            }
+            52 => {
+                let value = environment.new_table().map_err(|kind| self.fault(kind))?;
+                self.store(a, value.clone())?;
+                self.cached = value;
+            }
+            4 | 5 | 56..=59 => {
+                let left = self.operand(function, ((instruction >> 17) & 511) as usize)?;
+                let right = self.operand(function, c)?;
+                let comparison = if opcode == 4 || opcode == 5 {
+                    self.equal(&left, &right)?
+                } else {
+                    let left = self.number(left)?;
+                    let right = self.number(right)?;
+                    if opcode <= 57 {
+                        left < right
+                    } else {
+                        left <= right
+                    }
+                };
+                next = self.conditional(function, usize::from(comparison) == a)?;
+            }
+            7 => {
+                let value = self.register(b)?;
+                self.store(a, value.clone())?;
+                self.cached = value;
+            }
+            9 => {
+                let end = if b == 0 { self.top } else { a + b - 1 };
+                let values = self
+                    .registers
+                    .get(a..end)
+                    .ok_or_else(|| self.fault(FaultKind::Register(end)))?;
+                result = Step::Returned(values.to_vec());
+            }
+            13 => {
+                self.store(a, Value::Boolean(b as u32))?;
+                next = self.branch(function, 1 + (c & 255) as isize)?;
+            }
+            25 => {
+                let value = self.constant(function, ((instruction >> 8) & 0x1ffff) as usize)?;
+                self.store(a, value)?;
+            }
+            26 => {
+                if a <= b {
+                    let fault = self.fault(FaultKind::Register(b));
+                    self.registers.get_mut(a..=b).ok_or(fault)?.fill(Value::Nil);
+                }
+            }
+            28 => {
+                next = self.branch(
+                    function,
+                    ((instruction >> 8) & 0x1ffff) as isize - 65535 + 1,
+                )?;
+            }
+            40..=47 => {
+                let left =
+                    self.number(self.operand(function, ((instruction >> 17) & 511) as usize)?)?;
+                let right = self.number(self.operand(function, c)?)?;
+                let value = match opcode {
+                    40 | 41 => right + left,
+                    42 | 43 => left - right,
+                    44 | 45 => right * left,
+                    46 | 47 => left / right,
+                    _ => unreachable!(),
+                };
+                self.store(a, Value::Number(value))?;
+            }
+            53 => {
+                let value = self.number(self.register(b)?)?;
+                self.store(a, Value::Number(-value))?;
+            }
+            54 | 72 => {
+                let value = if opcode == 54 {
+                    self.register(b)?
+                } else {
+                    self.cached.clone()
+                };
+                self.store(a, Value::Boolean(u32::from(!value.truthy())))?;
+                self.cached = value;
+            }
+            1 | 71 => {
+                let value = if opcode == 1 {
+                    self.register(a)?
+                } else {
+                    self.cached.clone()
+                };
+                next = self.conditional(function, usize::from(value.truthy()) == (c & 255))?;
+                self.cached = value;
+            }
+            61 => {
+                let value = self.register(b)?;
+                let taken = usize::from(value.truthy()) == (c & 255);
+                next = self.conditional(function, taken)?;
+                if taken {
+                    self.store(a, value)?;
+                }
+            }
+            _ => return Err(self.fault(FaultKind::Opcode(opcode))),
+        }
+        self.pc = next;
+        Ok(result)
+    }
+
+    pub fn run(&mut self, function: &Function, budget: usize) -> Result<Vec<Value>, Fault> {
+        self.run_with(function, budget, &mut Unbound)
+    }
+
+    pub fn run_with(
+        &mut self,
+        function: &Function,
+        budget: usize,
+        environment: &mut dyn Environment,
+    ) -> Result<Vec<Value>, Fault> {
+        for _ in 0..budget {
+            match self.step_with(function, environment)? {
+                Step::Returned(values) => return Ok(values),
+                Step::Call { .. } => return Err(self.fault(FaultKind::BindingRequired)),
+                Step::Continue => {}
+            }
+        }
+        Err(self.fault(FaultKind::Budget))
+    }
+}

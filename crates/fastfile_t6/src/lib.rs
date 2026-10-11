@@ -8,8 +8,10 @@ mod cipher;
 mod content;
 pub mod ddl;
 mod envelope;
+pub mod hks;
 pub mod light_grid;
 mod path;
+mod raw_file;
 mod salsa20;
 pub mod schema;
 mod script;
@@ -27,6 +29,7 @@ pub use envelope::{
     MAX_XFILE_COUNT, ZONE_NAME_LEN, ZONE_VERSION_PC, parse_file_header,
 };
 pub use path::{PathLink, PathNode};
+pub use raw_file::{RawFileError, read_raw_file};
 pub use script::{
     RawFile, ScriptAsset, ScriptError, StringTable, ZoneScripts, raw_file, scripts, string_table,
 };
