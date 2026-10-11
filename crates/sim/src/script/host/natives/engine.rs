@@ -517,16 +517,30 @@ fn fx_on_tag(
                 },
             );
         }
-        _ if kind == entity_iw4::EntityEventKind::PLAY_FX_ON_TAG => world_event(
-            world,
-            entity_iw4::EntityEventKind::PLAY_FX,
-            index,
-            origin,
-            direction,
-        ),
+        _ if kind == entity_iw4::EntityEventKind::PLAY_FX_ON_TAG => {
+            play_fx_at(world, index, origin, direction, [0.0; 3]);
+        }
         _ => {}
     }
     Ok(Value::Undefined)
+}
+
+/// An effect at a point; with an up axis, played along forward and up.
+pub(crate) fn play_fx_at(
+    world: &mut World,
+    index: u8,
+    origin: [f32; 3],
+    forward: [f32; 3],
+    up: [f32; 3],
+) {
+    world_event(
+        world,
+        entity_iw4::EntityEventKind::PLAY_FX,
+        index,
+        origin,
+        forward,
+        up,
+    );
 }
 
 fn world_event(
@@ -535,6 +549,7 @@ fn world_event(
     index: u8,
     origin: [f32; 3],
     direction: [f32; 3],
+    origin2: [f32; 3],
 ) {
     let tick = world.resource::<crate::step::StepRequest>().tick;
     crate::frame::FrameWorld::from_world(world).push_entity_event(
@@ -546,6 +561,7 @@ fn world_event(
             event_parm: i32::from(index),
             origin,
             direction,
+            origin2,
             ..Default::default()
         },
     );
@@ -635,6 +651,7 @@ pub(crate) fn play_sound_at(
         entity_iw4::EntityEventKind::SOUND_ALIAS,
         index,
         origin,
+        ZERO,
         ZERO,
     );
     Ok(())
@@ -1552,13 +1569,7 @@ fn register_sound_and_fx(registry: &mut NativeRegistry) {
         let origin = vector(args, 1)?;
         let forward = optional(args, 2, vector)?.unwrap_or([0.0; 3]);
         let index = crate::frame::FrameWorld::from_world(world).effect_name_index(&name);
-        world_event(
-            world,
-            entity_iw4::EntityEventKind::PLAY_FX,
-            index,
-            origin,
-            forward,
-        );
+        play_fx_at(world, index, origin, forward, [0.0; 3]);
         Ok(Value::Undefined)
     });
     registry.register(Function, "playfxontag", |world, _, args| {
