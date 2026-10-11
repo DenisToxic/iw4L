@@ -59,7 +59,9 @@ impl game_api::GameScripts for T6 {
     }
 
     fn engine_dvars(&self, _gametype: &str) -> &'static [(&'static str, &'static str)] {
-        &[]
+        // The client game registers it on; server scripts then leave
+        // createfx effects and sounds to client scripts.
+        &[("cg_usingClientScripts", "1")]
     }
 
     fn config_defaults(&self) -> &'static [(&'static str, &'static str)] {
