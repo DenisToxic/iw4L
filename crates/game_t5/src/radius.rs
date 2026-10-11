@@ -25,7 +25,7 @@ fn ai_explosion_unknown() -> &'static Unknown {
     )
 }
 
-fn blast_effects_unknown() -> &'static Unknown {
+pub(crate) fn blast_effects_unknown() -> &'static Unknown {
     unknown!(
         "t5.weapons.blast_effects",
         "a blast pushes no physics objects, breaks no glass or dynamic models and sends no explosion event",
@@ -142,8 +142,7 @@ fn sight_points(entity: &FireEntity, origin: [f32; 3], eye: [f32; 3]) -> [[f32; 
     }
     // A model's centre and the extent its bounds reach from it.
     let (local_mins, local_maxs) = entity.model_bounds.unwrap_or(([0.0; 3], [0.0; 3]));
-    let local_center: [f32; 3] =
-        core::array::from_fn(|i| (local_mins[i] + local_maxs[i]) * 0.5);
+    let local_center: [f32; 3] = core::array::from_fn(|i| (local_mins[i] + local_maxs[i]) * 0.5);
     let r = rotate(entity.angles, local_center);
     let c = [at[0] + r[0], at[1] + r[1], at[2] + r[2]];
     let far = match (entity.script_model, entity.bounds) {
@@ -211,7 +210,10 @@ fn can_damage(
 /// A blast: every entity whose bounds lie within its radius and that it can
 /// see takes its damage, from the inner damage at the origin to the outer
 /// at the edge. True when it struck an enemy of the attacker.
-pub(crate) fn radius_damage(blast: &RadiusDamage, world: &mut dyn FireWorld) -> Vec<&'static Unknown> {
+pub(crate) fn radius_damage(
+    blast: &RadiusDamage,
+    world: &mut dyn FireWorld,
+) -> Vec<&'static Unknown> {
     let mut gaps = vec![ai_explosion_unknown(), blast_effects_unknown()];
     let radius = blast.radius.max(1.0);
     let reach = radius * 1.41421354;
@@ -236,7 +238,9 @@ pub(crate) fn radius_damage(blast: &RadiusDamage, world: &mut dyn FireWorld) -> 
         let dist = distance_sq(&entity, blast.origin).sqrt();
         let amount = (1.0 - dist / radius) * (blast.inner - blast.outer) + blast.outer;
         let eye = match entity.kind {
-            FireEntityKind::Player => crate::fire::player_eye(world, target).unwrap_or(entity.origin),
+            FireEntityKind::Player => {
+                crate::fire::player_eye(world, target).unwrap_or(entity.origin)
+            }
             FireEntityKind::Actor => entity.eye.unwrap_or(entity.origin),
             FireEntityKind::Other => entity.origin,
         };

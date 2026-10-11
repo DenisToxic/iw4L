@@ -563,16 +563,49 @@ pub(crate) fn shot_target(world: &mut World, target: ScriptModelId) -> Option<Sh
     })
 }
 
-/// Notifies `name` on a player, with a weapon's name when given.
-pub(crate) fn notify_player(world: &mut World, client: u32, name: &str, weapon: Option<&str>) {
-    let receiver = super::players::player_object(world, client);
-    if matches!(receiver, Value::Undefined) {
-        return;
+/// A value a game's notify passes to scripts.
+#[derive(Clone, Debug)]
+pub(crate) enum NotifyValue {
+    String(String),
+    /// A script object; undefined when the entity has none.
+    Entity(Option<u64>),
+    Vector([f32; 3]),
+    Float(f32),
+    Int(i32),
+}
+
+/// Notifies `name` on a script object.
+pub(crate) fn notify_entity(world: &mut World, object: u64, name: &str, args: &[NotifyValue]) {
+    let args = args
+        .iter()
+        .map(|arg| match arg {
+            NotifyValue::String(text) => Value::string(text),
+            NotifyValue::Entity(Some(object)) => Value::Object(*object),
+            NotifyValue::Entity(None) => Value::Undefined,
+            NotifyValue::Vector(v) => Value::Vector(*v),
+            NotifyValue::Float(f) => Value::Float(*f),
+            NotifyValue::Int(n) => Value::Int(*n),
+        })
+        .collect();
+    raise(world, Value::Object(object), name, args);
+}
+
+/// A player's script object.
+pub(crate) fn player_object_id(world: &World, client: u32) -> Option<u64> {
+    match super::players::player_object(world, client) {
+        Value::Object(object) => Some(object),
+        _ => None,
     }
-    let args = weapon
-        .map(|weapon| vec![Value::string(weapon)])
-        .unwrap_or_default();
-    raise(world, receiver, name, args);
+}
+
+/// The script object an entity number stands for.
+pub(crate) fn object_by_number(world: &World, number: i32) -> Option<u64> {
+    world
+        .get_resource::<RoundScript>()?
+        .entities
+        .iter()
+        .find(|(_, entity)| entity.number == number)
+        .map(|(object, _)| *object)
 }
 
 /// Every script entity the match presents, with its origin.
@@ -587,9 +620,11 @@ pub(crate) fn presented_origins(world: &mut World) -> Vec<(ScriptModelId, [f32; 
         .collect();
     presented
         .into_iter()
-        .map(|(object, id)| match runtime.object_field(object, "origin") {
-            Value::Vector(at) => (id, at),
-            _ => (id, [0.0; 3]),
-        })
+        .map(
+            |(object, id)| match runtime.object_field(object, "origin") {
+                Value::Vector(at) => (id, at),
+                _ => (id, [0.0; 3]),
+            },
+        )
         .collect()
 }

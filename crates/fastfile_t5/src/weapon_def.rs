@@ -680,4 +680,114 @@ impl<'a> WeaponDefView<'a> {
     pub fn explosion_inner_damage(&self) -> i32 {
         i32::from_le_bytes(Self::word(self.def, 0x5bc))
     }
+
+    /// `projectileSpeed`
+    pub fn projectile_speed(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5c8))
+    }
+
+    /// `projectileSpeedUp`
+    pub fn projectile_speed_up(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5cc))
+    }
+
+    /// `projectileSpeedRelativeUp`
+    pub fn projectile_speed_relative_up(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5d0))
+    }
+
+    /// `projectileSpeedForward`
+    pub fn projectile_speed_forward(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5d4))
+    }
+
+    /// `projectileActivateDist`
+    pub fn projectile_activate_dist(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5d8))
+    }
+
+    /// `timeToAccelerate`
+    pub fn time_to_accelerate(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x5e0))
+    }
+
+    /// `projectileCurvature`
+    pub fn projectile_curvature(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x5e4))
+    }
+
+    /// `projExplosionType`
+    pub fn proj_explosion_type(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5ec))
+    }
+
+    /// `projExplosionEffectForceNormalUp`
+    pub fn proj_explosion_effect_force_normal_up(&self) -> bool {
+        self.def[0x5f4] != 0
+    }
+
+    /// `projImpactExplode`
+    pub fn proj_impact_explode(&self) -> bool {
+        self.def[0x62c] != 0
+    }
+
+    /// `stickiness`
+    pub fn stickiness(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x630))
+    }
+
+    /// `explosionRadius`
+    pub fn explosion_radius(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5b0))
+    }
+
+    /// `explosionRadiusMin`
+    pub fn explosion_radius_min(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5b4))
+    }
+
+    /// `explosionOuterDamage`
+    pub fn explosion_outer_damage(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5c0))
+    }
+
+    /// `damageConeAngle`
+    pub fn damage_cone_angle(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x5c4))
+    }
+
+    /// `forceBounce`
+    pub fn force_bounce(&self) -> bool {
+        self.def[0x572] != 0
+    }
+
+    /// `retrievable`
+    pub fn retrievable(&self) -> bool {
+        self.def[0x56d] != 0
+    }
+
+    /// `dieOnRespawn`
+    pub fn die_on_respawn(&self) -> bool {
+        self.def[0x56e] != 0
+    }
+
+    /// `destabilizeDistance`
+    pub fn destabilize_distance(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x7b8))
+    }
+
+    /// `destabilizationRateTime`
+    pub fn destabilization_rate_time(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x7b0))
+    }
+
+    /// `explodeOnGround`
+    pub fn explode_on_ground(&self) -> bool {
+        self.def[0x56b] != 0
+    }
+
+    /// `isRollingGrenade`
+    pub fn is_rolling_grenade(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5ac))
+    }
 }
