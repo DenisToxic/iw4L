@@ -10,6 +10,7 @@ use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 
 mod actor;
+mod anim;
 mod attach;
 mod barrier;
 mod effect;
@@ -1693,6 +1694,7 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         }
     }
     actor::register(registry);
+    anim::register(registry);
     attach::register(registry);
     barrier::register(registry);
     weapon::register_natives(registry);

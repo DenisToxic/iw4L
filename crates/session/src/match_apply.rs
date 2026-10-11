@@ -446,6 +446,13 @@ pub fn apply_prepared_match(
 
         let anim_namespace = prepared_map.namespace.expect("installed map family");
         content.set_script_model_states(xanims.0.zombie_states(anim_namespace));
+        content.set_anim_state_tables(xanims.0.state_tables(anim_namespace).map(
+            |(name, table)| {
+                let name = name.rsplit('/').next().unwrap_or(name);
+                let name = name.strip_suffix(".asd").unwrap_or(name);
+                (name.to_owned(), Arc::clone(table))
+            },
+        ));
         content.set_script_model_clips(
             xanims
                 .0

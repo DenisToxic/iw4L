@@ -5,9 +5,11 @@ use crate::script::host::natives;
 use crate::script::{Namespace, RoundScript, Value};
 
 pub type Native = fn(&mut World, &Value, &[Value]) -> Result<Value, String>;
+/// Engine work a game's natives do every authority tick, before scripts run.
+pub type Tick = fn(&mut World);
 
 #[derive(Resource, Clone)]
-pub struct NativeRegistry(BTreeMap<(Namespace, String), Native>);
+pub struct NativeRegistry(BTreeMap<(Namespace, String), Native>, Vec<Tick>);
 impl Default for NativeRegistry {
     /// The engine services alone: no game's own natives.
     fn default() -> Self {
@@ -18,7 +20,7 @@ impl NativeRegistry {
     /// Builtins every game's scripts are served the same way: the language
     /// helpers, dvars, math, entities, players, sound, physics, triggers.
     pub fn engine_services() -> Self {
-        let mut registry = Self(BTreeMap::new());
+        let mut registry = Self(BTreeMap::new(), Vec::new());
         registry.register(Namespace::Function, "isdefined", |world, _, args| {
             if args.len() != 1 {
                 return Err("isdefined expects one argument".into());
@@ -95,15 +97,23 @@ impl NativeRegistry {
     /// Black Ops 3's builtins alone: none of the engine services above, which
     /// serve the other games' rules.
     pub fn black_ops_2() -> Self {
-        let mut registry = Self(BTreeMap::new());
+        let mut registry = Self(BTreeMap::new(), Vec::new());
         natives::t6::register(&mut registry);
         registry
     }
 
     pub fn black_ops_3() -> Self {
-        let mut registry = Self(BTreeMap::new());
+        let mut registry = Self(BTreeMap::new(), Vec::new());
         natives::t7::register(&mut registry);
         registry
+    }
+
+    pub fn on_tick(&mut self, tick: Tick) {
+        self.1.push(tick);
+    }
+
+    pub(crate) fn ticks(&self) -> Vec<Tick> {
+        self.1.clone()
     }
 
     pub fn register(&mut self, namespace: Namespace, name: &str, native: Native) {
