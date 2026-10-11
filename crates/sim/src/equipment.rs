@@ -742,6 +742,7 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
                         glass_encoded,
                         ..
                     }),
+                ..
             } if missile_glass_punch_eligible(speed, surface_flags, glass_encoded) => {
                 let pane = u32::from(glass_encoded).saturating_sub(1);
                 if world.world_objects().glass_is_solid(pane) {
@@ -820,7 +821,7 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
             normal,
             collider,
         } => Some((end, normal, Some(collider), fraction)),
-        TraceOutcome::StartSolid { collider, end } => {
+        TraceOutcome::StartSolid { collider, end, .. } => {
             Some((end, startsolid_normal(start, end), collider, 0.0))
         }
         TraceOutcome::Miss { .. } | TraceOutcome::Invalid { .. } => None,
@@ -963,6 +964,7 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
                                     dir: projectile.velocity,
                                     bone,
                                     flags: 0,
+                                    hit_location: None,
                                 },
                             ));
                         }
@@ -1119,6 +1121,7 @@ pub(crate) fn think_projectile(world: &mut FrameWorld, tick: Tick, entnum: i32) 
                                     dir: projectile.velocity,
                                     bone,
                                     flags: 0,
+                                    hit_location: None,
                                 },
                             ));
                         }

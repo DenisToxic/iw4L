@@ -183,6 +183,7 @@ fn apply_entity_blast(world: &mut FrameWorld, blast: &ExplosionBlast) {
                 dir: std::array::from_fn(|i| mid[i] - blast.origin[i]),
                 bone: None,
                 flags: IDFLAGS_RADIUS,
+                hit_location: None,
             },
         );
     }

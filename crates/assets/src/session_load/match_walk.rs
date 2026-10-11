@@ -72,9 +72,9 @@ pub(super) async fn walk_prepared_match(
         shared_surfaces,
         scene_models: mut common_scene_models,
         light_defs: common_light_defs,
-        pen_table: common_pen_table,
-        pen_table_loaded: common_pen_loaded,
-        lochit_table: common_lochit_table,
+        pen_table: mut common_pen_table,
+        pen_table_loaded: mut common_pen_loaded,
+        lochit_table: mut common_lochit_table,
         tracers: mut common_tracers,
         xmodel_walk,
         s1_common_bytes,
@@ -209,6 +209,14 @@ pub(super) async fn walk_prepared_match(
     );
     let zombie_fx = zombie.fx;
     let zombie_impact_fx = zombie.impact_fx;
+    // Black Ops' singleplayer tables for its zombie maps.
+    if let Some(table) = zombie.pen_table {
+        common_pen_table = table;
+        common_pen_loaded = true;
+    }
+    if zombie.lochit_table.is_some() {
+        common_lochit_table = zombie.lochit_table;
+    }
     let zombie_scene_models = zombie.scene_models;
     let zombie_hud_images = zombie.hud_images;
     report.extend(zombie.report);

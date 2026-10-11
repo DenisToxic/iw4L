@@ -1214,6 +1214,10 @@ pub(super) struct ZombieCommons {
     pub(super) fx: asset_game::FxCatalog,
     /// The impact effect table of the last zombie zone that has one.
     pub(super) impact_fx: Option<asset_game::OwnedFxImpactTable>,
+    /// Black Ops' singleplayer penetration depths and hit location damage,
+    /// from the zone that carries them.
+    pub(super) pen_table: Option<crate::lane::PenTable>,
+    pub(super) lochit_table: Option<crate::lane::LochitTable>,
     /// Singleplayer and zombie scripts, lowest priority first; the map and its
     /// patch go on top.
     pub(super) scripts: Option<crate::ScriptSources>,
@@ -1297,6 +1301,12 @@ pub(super) fn walk_zombie_commons(zone_ff: &Path, progress: &LoadProgress) -> Zo
         commons.fx.absorb(census.fx);
         if census.impact_fx.is_some() {
             commons.impact_fx = census.impact_fx;
+        }
+        if census.pen_table_loaded {
+            commons.pen_table = Some(census.pen_table);
+        }
+        if census.lochit_table.is_some() {
+            commons.lochit_table = census.lochit_table;
         }
         commons.report.push(format!(
             "zombie common {zone}: xanims={xanims} weapons={} scene_models={} scripts={}",

@@ -85,30 +85,6 @@ fn events_unknown() -> &'static Unknown {
     )
 }
 
-fn fire_unknown() -> &'static Unknown {
-    unknown!(
-        "t5.weapons.fire",
-        "what a Black Ops shot does is not run: bullets, projectiles, thrown grenades, melee hits",
-        "Black Ops' server fire rules (bullets and spread, projectiles, grenades, melee) from its executable"
-    )
-}
-
-/// The weapon events whose effect the server makes.
-fn fires(event: i32) -> bool {
-    use movement_t5::events::event as ev;
-    matches!(
-        event,
-        ev::FIRE_WEAPON
-            | ev::FIRE_WEAPON_LASTSHOT
-            | ev::FIRE_WEAPON_LEFT
-            | ev::FIRE_WEAPON_LASTSHOT_LEFT
-            | ev::FIRE_MELEE
-            | ev::USE_OFFHAND
-            | ev::DETONATE
-            | ev::GRENADE_SUICIDE
-    )
-}
-
 fn water_unknown() -> &'static Unknown {
     unknown!(
         "t5.movement.water",
@@ -117,7 +93,7 @@ fn water_unknown() -> &'static Unknown {
     )
 }
 
-fn weapon_unknown() -> &'static Unknown {
+pub(crate) fn weapon_unknown() -> &'static Unknown {
     unknown!(
         "t5.movement.weapon",
         "a weapon without Black Ops' definition is read with every field zero",
@@ -540,13 +516,6 @@ impl PlayerMovement for T5Movement {
             if !outcome.signals.is_empty() {
                 outcome.gaps.push(events_unknown());
             }
-            if outcome
-                .signals
-                .iter()
-                .any(|s| matches!(s, MoveSignal::Event { event, .. } if fires(*event)))
-            {
-                outcome.gaps.push(fire_unknown());
-            }
             last = pm.cmd;
         }
         if adapter.water_unknown.get() {
@@ -672,6 +641,25 @@ impl PlayerMovement for T5Movement {
         let mut player = *player;
         let (ps, _) = unpack(&mut player);
         ps.perks & bits != 0
+    }
+
+    fn server_events(
+        &self,
+        before: &MovePlayer,
+        player: &MovePlayer,
+        signals: &[MoveSignal],
+        world: &mut dyn game_api::fire::FireWorld,
+    ) -> Vec<&'static Unknown> {
+        let (ps, _) = unpack(&mut player.clone());
+        let (was, _) = unpack(&mut before.clone());
+        crate::fire::server_events(
+            &ps,
+            was.aim_spread_scale,
+            was.viewangles,
+            signals,
+            self.zombies,
+            world,
+        )
     }
 
     fn clear_perks(&self, player: &mut MovePlayer) {

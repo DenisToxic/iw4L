@@ -1,7 +1,7 @@
 use crate::EquipmentRuntimeFacts;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use weapon_iw4::WeaponCombatFacts;
+use weapon_iw4::{HITLOC_COUNT, WeaponCombatFacts};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WeaponSetup {
@@ -54,6 +54,8 @@ pub struct SimWeaponContent {
     pub(crate) bullet_pen: Vec<weapon_iw4::BulletPenFacts>,
     pub(crate) pen_table: weapon_iw4::PenetrationDepthTable,
     pub(crate) pen_table_loaded: bool,
+    /// The game's damage multipliers by hit location.
+    pub(crate) hit_locations: Option<[f32; HITLOC_COUNT]>,
     pub(crate) weapon_script_names: Arc<[String]>,
     pub(crate) weapon_script_aliases: BTreeMap<String, u32>,
     pub(crate) weapon_setups: Arc<[Option<WeaponSetup>]>,
@@ -88,6 +90,7 @@ impl SimWeaponContent {
             bullet_pen: Default::default(),
             pen_table: Default::default(),
             pen_table_loaded: Default::default(),
+            hit_locations: Default::default(),
             weapon_script_names: Default::default(),
             weapon_script_aliases: Default::default(),
             weapon_setups: Default::default(),
@@ -105,6 +108,7 @@ impl SimWeaponContent {
         aliases: impl IntoIterator<Item = (String, u32)>,
         pen_table: weapon_iw4::PenetrationDepthTable,
         pen_table_loaded: bool,
+        hit_locations: Option<[f32; HITLOC_COUNT]>,
         rank_progression: Option<gamemode_iw4::progression::RankProgression>,
     ) -> Result<Arc<Self>, SimWeaponContentRefusal> {
         if rank_progression
@@ -117,6 +121,7 @@ impl SimWeaponContent {
             rank_progression,
             pen_table,
             pen_table_loaded,
+            hit_locations,
             ..Self::bootstrap()
         };
         let mut names = Vec::new();

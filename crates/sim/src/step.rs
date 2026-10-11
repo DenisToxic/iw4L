@@ -475,8 +475,14 @@ fn run_players_system(ecs: &mut World) {
                     )
                     .move_trace()
                 };
-                let outcome =
-                    crate::game_move::run(&mut world, movement, *id, cmd.move_command(), &trace);
+                let outcome = crate::game_move::run(
+                    &mut world,
+                    movement,
+                    *id,
+                    cmd.move_command(),
+                    &trace,
+                    tick,
+                );
                 for gap in outcome.gaps {
                     world.report_game_gap(gap);
                 }

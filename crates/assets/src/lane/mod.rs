@@ -92,6 +92,11 @@ impl LoadedWorld {
     }
 }
 
+/// A game's bullet penetration depths, by penetration and surface type.
+pub type PenTable = weapon_iw4::PenetrationDepthTable;
+/// A game's damage multipliers, by hit location.
+pub type LochitTable = [f32; weapon_iw4::HITLOC_COUNT];
+
 #[derive(Default)]
 pub struct CommonCensus {
     pub ui_images: Vec<(String, asset_material::material_images::ZoneUiImage)>,
@@ -118,9 +123,9 @@ pub struct CommonCensus {
     pub light_defs: Vec<asset_world::CapturedLightDef>,
     pub report: Vec<String>,
 
-    pub pen_table: weapon_iw4::PenetrationDepthTable,
+    pub pen_table: PenTable,
     pub pen_table_loaded: bool,
-    pub lochit_table: Option<[f32; weapon_iw4::HITLOC_COUNT]>,
+    pub lochit_table: Option<LochitTable>,
 
     pub xmodel_walk: crate::PreparedXModelWalkCensus,
 

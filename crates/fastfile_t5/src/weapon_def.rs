@@ -610,4 +610,74 @@ impl<'a> WeaponDefView<'a> {
     pub fn reload_quick_empty_add_time(&self) -> i32 {
         i32::from_le_bytes(Self::word(self.def, 0x3e8))
     }
+
+    /// `penetrateType`
+    pub fn penetrate_type(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x24))
+    }
+
+    /// `shotCount`
+    pub fn shot_count(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x348))
+    }
+
+    /// `damage`
+    pub fn damage(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x35c))
+    }
+
+    /// `playerDamage`
+    pub fn player_damage(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x368))
+    }
+
+    /// `minDamage`
+    pub fn min_damage(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x7a0))
+    }
+
+    /// `minPlayerDamage`
+    pub fn min_player_damage(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x7a4))
+    }
+
+    /// `maxDamageRange`
+    pub fn max_damage_range(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x7a8))
+    }
+
+    /// `minDamageRange`
+    pub fn min_damage_range(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x7ac))
+    }
+
+    /// `stackFireSpread`
+    pub fn stack_fire_spread(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x484))
+    }
+
+    /// `rifleBullet`
+    pub fn rifle_bullet(&self) -> bool {
+        self.def[0x54d] != 0
+    }
+
+    /// `armorPiercing`
+    pub fn armor_piercing(&self) -> bool {
+        self.def[0x54e] != 0
+    }
+
+    /// `bulletImpactExplode`
+    pub fn bullet_impact_explode(&self) -> bool {
+        self.def[0x62d] != 0
+    }
+
+    /// `adsSpread`
+    pub fn ads_spread(&self) -> f32 {
+        f32::from_le_bytes(Self::word(self.def, 0x6c8))
+    }
+
+    /// `explosionInnerDamage`
+    pub fn explosion_inner_damage(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x5bc))
+    }
 }

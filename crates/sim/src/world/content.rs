@@ -408,6 +408,11 @@ impl SimContent {
         self.weapons().weapon_game.get(weapon as usize)?.as_deref()
     }
 
+    /// The game's damage multiplier at a hit location, when it has a table.
+    pub(crate) fn hit_location_multiplier(&self, location: usize) -> Option<f32> {
+        self.weapons().hit_locations?.get(location).copied()
+    }
+
     pub(super) fn weapons(&self) -> &Arc<crate::SimWeaponContent> {
         &self.data.weapons
     }

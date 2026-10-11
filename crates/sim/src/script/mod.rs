@@ -21,7 +21,8 @@ pub use host::entities::{
     KeyType, LevelData, StringTable, parse_entity_string, parse_radiant_keys,
 };
 pub(crate) use host::entity_damage::{
-    EntityHit, HitTarget, ScriptBlast, ScriptHit, damage_entity, radius_targets,
+    EntityHit, HitTarget, ScriptBlast, ScriptHit, damage_entity, notify_player, radius_targets,
+    shot_target,
 };
 pub(crate) use host::mechanics::Mechanics;
 pub(crate) use host::mechanics::advance_mechanics;
