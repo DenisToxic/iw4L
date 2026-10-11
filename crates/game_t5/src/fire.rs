@@ -59,6 +59,7 @@ const MEANS: [&str; 21] = [
 const MOD_PISTOL_BULLET: usize = 1;
 const MOD_RIFLE_BULLET: usize = 2;
 const MOD_MELEE: usize = 7;
+const MOD_FALLING: usize = 12;
 
 /// Hit locations, by number.
 const HIT_LOCATIONS: [&str; 19] = [
@@ -399,16 +400,16 @@ struct BulletParams {
 
 /// What a shot or blow does to one entity, before the server's damage
 /// rules.
-struct Hit {
-    target: i32,
-    dir: [f32; 3],
-    point: [f32; 3],
-    amount: i32,
-    flags: i32,
-    means: usize,
-    weapon: u32,
-    location: i32,
-    bone: Option<u16>,
+pub(crate) struct Hit {
+    pub(crate) target: i32,
+    pub(crate) dir: [f32; 3],
+    pub(crate) point: [f32; 3],
+    pub(crate) amount: i32,
+    pub(crate) flags: i32,
+    pub(crate) means: usize,
+    pub(crate) weapon: u32,
+    pub(crate) location: i32,
+    pub(crate) bone: Option<u16>,
 }
 
 /// One bullet trace and what it hit.
@@ -491,7 +492,7 @@ impl Shot<'_> {
         }
         let (forward, right, up) = movement_t5::math::angle_vectors(angles);
         let muzzle = mad(
-            self.view_origin(),
+            view_origin(self.ps),
             forward,
             dvar(world, "bg_gunXOffset", 0.0f32),
         );
@@ -501,20 +502,6 @@ impl Shot<'_> {
             up,
             muzzle,
         }
-    }
-
-    /// The player's eye: origin, eye height and lean.
-    fn view_origin(&self) -> [f32; 3] {
-        let ps = self.ps;
-        let mut eye = ps.origin;
-        eye[2] += ps.view_height_current;
-        if ps.leanf != 0.0 {
-            let frac = (2.0 - ps.leanf.abs()) * ps.leanf;
-            let roll = frac * 16.0;
-            let (_, right, _) = movement_t5::math::angle_vectors([0.0, ps.viewangles[1], roll]);
-            eye = mad(eye, right, frac * 20.0);
-        }
-        eye
     }
 
     /// The hip spread at the player's eye height, and what overrides it.
@@ -845,7 +832,11 @@ impl Shot<'_> {
             if location == 1 || location == 2 {
                 out_flags |= 1;
             }
-            self.damage(
+            let attacker = self.attacker();
+            self::damage(
+                self.gaps,
+                attacker,
+                attacker,
                 entity,
                 Hit {
                     target: hit,
@@ -951,7 +942,7 @@ impl Shot<'_> {
             self.gaps.push(crate::movement::weapon_unknown());
             return;
         };
-        let eye = self.view_origin();
+        let eye = view_origin(self.ps);
         let (forward, right, up) = movement_t5::math::angle_vectors(self.ps.viewangles);
         let range = if def.bayonet() {
             dvar(world, "player_bayonetRange", 85.0f32)
@@ -989,7 +980,11 @@ impl Shot<'_> {
         let amount = damage + world.rand() % 5;
         let dir = [forward[0], forward[1], forward[2] + 0.25];
         let weapon = self.damage_weapon(world);
-        self.damage(
+        let attacker = self.attacker();
+        self::damage(
+            self.gaps,
+            attacker,
+            attacker,
             entity,
             Hit {
                 target,
@@ -1076,80 +1071,133 @@ impl Shot<'_> {
         ps.weapon
     }
 
-    /// The server's damage to what a player's shot or blow hits.
-    fn damage(&mut self, entity: FireEntity, hit: Hit, world: &mut dyn FireWorld) {
-        let Hit {
-            target,
-            dir,
-            point,
-            mut amount,
-            flags,
-            means,
-            weapon,
-            location,
-            bone,
-        } = hit;
-        let attacker = self.attacker();
-        if entity.kind == FireEntityKind::Player {
-            self.gaps.push(player_hit_unknown());
+}
+
+/// The server's damage to what a shot, blow or blast reaches: a player's
+/// own multipliers, an actor's hit location multipliers, then the entity's
+/// damage callback.
+pub(crate) fn damage(
+    gaps: &mut Vec<&'static Unknown>,
+    attacker: i32,
+    inflictor: i32,
+    entity: FireEntity,
+    hit: Hit,
+    world: &mut dyn FireWorld,
+) {
+    let Hit {
+        target,
+        dir,
+        point,
+        mut amount,
+        flags,
+        means,
+        weapon,
+        location,
+        bone,
+    } = hit;
+    if entity.kind == FireEntityKind::Player {
+        if target != attacker && world.entity(attacker).is_some_and(|e| e.kind == FireEntityKind::Player) {
+            gaps.push(player_hit_unknown());
             return;
         }
-        let attacker_team = world.entity(attacker).and_then(|e| e.team);
-        if entity.kind == FireEntityKind::Actor
-            && dvar_string(world, "g_gametype").as_deref() == Some("vs")
-            && entity.team.is_some()
-            && entity.team == attacker_team
-        {
+        let Some(player) = world.player(target) else {
+            return;
+        };
+        let (ps, _) = crate::movement::unpack(&mut player.clone());
+        if ps.other_flags & 1 != 0 || ps.pm_type == movement_t5::state::pm_type::DEAD {
             return;
         }
-        if entity.kind == FireEntityKind::Actor
-            && !entity.ignore_locational_damage
-            && means != MOD_MELEE
-        {
-            let scale = location_multiplier(location, weapon, world);
-            let capped = matches!(entity.ai_type, Some("zombie" | "dog"));
-            let scale = if capped && scale > 1.0 {
-                1.0
-            } else if scale == 0.0 {
-                return;
+        if means != MOD_FALLING {
+            let scale = if flags & dflags::RADIUS != 0 {
+                dvar(world, "player_radiusDamageMultiplier", 1.0f32)
+            } else if means == MOD_MELEE {
+                dvar(world, "player_meleeDamageMultiplier", 1.0f32)
             } else {
-                scale
+                dvar(world, "player_damageMultiplier", 1.0f32)
             };
             amount = (amount as f32 * scale) as i32;
-            if amount < 1 {
-                amount = 1;
-            }
-        }
-        if entity.god {
-            return;
         }
         amount = amount.max(1);
-        if entity.kind == FireEntityKind::Actor && !entity.allow_death && amount >= entity.health {
-            self.gaps.push(delayed_death_unknown());
-        }
-        if flags & dflags::RADIUS == 0 && entity.demigod && entity.health <= amount {
-            amount = entity.health - 1;
-        }
-        if amount == 0 {
-            return;
-        }
-        world.damage(&FireDamage {
-            target,
-            inflictor: attacker,
-            attacker,
-            dir: normalized(dir),
-            point,
-            amount,
-            flags,
-            means: MEANS[means],
-            weapon,
-            hit_location: HIT_LOCATIONS
-                .get(location as usize)
-                .copied()
-                .unwrap_or("none"),
-            bone,
-        });
     }
+    let attacker_team = world.entity(attacker).and_then(|e| e.team);
+    if entity.kind == FireEntityKind::Actor
+        && dvar_string(world, "g_gametype").as_deref() == Some("vs")
+        && entity.team.is_some()
+        && entity.team == attacker_team
+    {
+        return;
+    }
+    if entity.kind == FireEntityKind::Actor && !entity.ignore_locational_damage && means != MOD_MELEE
+    {
+        let scale = location_multiplier(location, weapon, world);
+        let capped = matches!(entity.ai_type, Some("zombie" | "dog"));
+        let scale = if capped && scale > 1.0 {
+            1.0
+        } else if scale == 0.0 {
+            return;
+        } else {
+            scale
+        };
+        amount = (amount as f32 * scale) as i32;
+        if amount < 1 {
+            amount = 1;
+        }
+    }
+    if entity.god {
+        return;
+    }
+    amount = amount.max(1);
+    if entity.kind == FireEntityKind::Actor && !entity.allow_death && amount >= entity.health {
+        gaps.push(delayed_death_unknown());
+    }
+    if flags & dflags::RADIUS == 0 && entity.demigod && entity.health <= amount {
+        amount = entity.health - 1;
+    }
+    if amount == 0 {
+        return;
+    }
+    world.damage(&FireDamage {
+        target,
+        inflictor,
+        attacker,
+        dir: normalized(dir),
+        point,
+        amount,
+        flags,
+        means: MEANS[means],
+        weapon,
+        hit_location: HIT_LOCATIONS
+            .get(location as usize)
+            .copied()
+            .unwrap_or("none"),
+        location,
+        bone,
+    });
+}
+
+/// A means of death's number, by its script name.
+pub(crate) fn means_index(name: &str) -> usize {
+    MEANS.iter().position(|m| *m == name).unwrap_or(0)
+}
+
+/// A player's eye: origin, eye height and lean.
+pub(crate) fn view_origin(ps: &PlayerState) -> [f32; 3] {
+    let mut eye = ps.origin;
+    eye[2] += ps.view_height_current;
+    if ps.leanf != 0.0 {
+        let frac = (2.0 - ps.leanf.abs()) * ps.leanf;
+        let roll = frac * 16.0;
+        let (_, right, _) = movement_t5::math::angle_vectors([0.0, ps.viewangles[1], roll]);
+        eye = mad(eye, right, frac * 20.0);
+    }
+    eye
+}
+
+/// Another player's eye, from its movement state.
+pub(crate) fn player_eye(world: &dyn FireWorld, entity: i32) -> Option<[f32; 3]> {
+    let player = world.player(entity)?;
+    let (ps, _) = crate::movement::unpack(&mut player.clone());
+    Some(view_origin(&ps))
 }
 
 /// A weapon's definition and variant bytes, copied out of the match.
@@ -1163,7 +1211,7 @@ fn dvar_string(world: &dyn FireWorld, name: &str) -> Option<String> {
     world.dvar(name)
 }
 
-fn sentient(entity: FireEntity) -> bool {
+pub(crate) fn sentient(entity: FireEntity) -> bool {
     matches!(entity.kind, FireEntityKind::Player | FireEntityKind::Actor)
 }
 

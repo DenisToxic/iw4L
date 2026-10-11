@@ -21,7 +21,7 @@ pub use host::entities::{
     KeyType, LevelData, StringTable, parse_entity_string, parse_radiant_keys,
 };
 pub(crate) use host::entity_damage::{
-    EntityHit, HitTarget, ScriptBlast, ScriptHit, damage_entity, notify_player, radius_targets,
+    EntityHit, HitTarget, ScriptBlast, ScriptHit, damage_entity, notify_player, presented_origins, radius_targets,
     shot_target,
 };
 pub(crate) use host::mechanics::Mechanics;
@@ -32,7 +32,8 @@ pub use host::natives::t7::GametypeSettings;
 pub(crate) use host::players::{
     answer_join, answer_menu, apply_disconnects, apply_player_links, choose_class,
     choose_default_class, disconnect_player, flashbang, force_death, give_killstreak, is_t5,
-    note_team_answer, personal_class, player_damage, script_seats, set_profile, sync_players,
+    game_player_damage, note_team_answer, personal_class, player_damage, script_seats, set_profile,
+    sync_players,
 };
 pub(crate) use host::presence::sync_presence;
 pub use host::registry::{Native, NativeRegistry};
