@@ -1,4 +1,4 @@
-use super::{Environment, FaultKind, Value};
+use super::{ENGINE_API, Environment, FaultKind, METAMETHODS, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -181,7 +181,13 @@ impl Environment for Tables {
                     return Ok(value);
                 }
             }
+            if matches!(current, Value::Bytes(_)) {
+                return Err(FaultKind::Unknown(ENGINE_API));
+            }
             let index = self.metafield(&current, b"__index")?;
+            if matches!(index, Value::Reference { kind: 9 | 10, .. }) {
+                return Err(FaultKind::Unknown(METAMETHODS));
+            }
             if matches!(index, Value::Nil) {
                 return if matches!(current, Value::Reference { kind: 5, .. }) {
                     Ok(Value::Nil)
@@ -214,6 +220,9 @@ impl Environment for Tables {
             let newindex = self.metafield(&current, b"__newindex")?;
             if matches!(newindex, Value::Nil) {
                 return self.raw_set(&current, key, value);
+            }
+            if matches!(newindex, Value::Reference { kind: 9 | 10, .. }) {
+                return Err(FaultKind::Unknown(METAMETHODS));
             }
             self.index(&newindex)?;
             current = newindex;

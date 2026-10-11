@@ -1,7 +1,14 @@
 use super::script::tables::Tables;
 use super::script::{Environment, FaultKind, Value};
 use super::{Axis, State};
+use game_api::{Unknown, unknown};
 use std::sync::Arc;
+
+const RENDER: &Unknown = unknown!(
+    "t6.ui.render",
+    "animation-state material, font, alignment, shader vectors and 3D window",
+    "Black Ops 2's LUI layout, input and rendering"
+);
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AnimationState {
@@ -13,6 +20,95 @@ pub struct AnimationState {
     pub color: [Option<f32>; 3],
     pub opacity: Option<f32>,
     pub spacing: Option<f32>,
+}
+
+impl State {
+    pub fn interpolate(&mut self, source: &Self, target: &Self, fraction: f32) {
+        let inverse = 1.0 - fraction;
+        let blend = |start: f32, end: f32| start * inverse + end * fraction;
+        for (indices, enabled) in [
+            (
+                [0, 2],
+                source.changes.horizontal && target.changes.horizontal,
+            ),
+            ([1, 3], source.changes.vertical && target.changes.vertical),
+        ] {
+            for index in indices {
+                self.resolved_rectangle[index] = if enabled {
+                    blend(
+                        source.resolved_rectangle[index],
+                        target.resolved_rectangle[index],
+                    )
+                } else {
+                    source.resolved_rectangle[index]
+                };
+            }
+        }
+        for ((destination, (start, end)), enabled) in self
+            .rotation
+            .iter_mut()
+            .zip(source.rotation.into_iter().zip(target.rotation))
+            .zip(
+                source
+                    .changes
+                    .rotation
+                    .into_iter()
+                    .zip(target.changes.rotation)
+                    .map(|(start, end)| start && end),
+            )
+        {
+            if enabled {
+                *destination = blend(start, end);
+            }
+        }
+        for ((destination, (start, end)), enabled) in self
+            .color
+            .iter_mut()
+            .zip(source.color.into_iter().zip(target.color))
+            .zip(
+                source
+                    .changes
+                    .color
+                    .into_iter()
+                    .zip(target.changes.color)
+                    .map(|(start, end)| start && end),
+            )
+        {
+            if enabled {
+                *destination = blend(start, end);
+            }
+        }
+        for (destination, start, end, enabled) in [
+            (
+                &mut self.zoom,
+                source.zoom,
+                target.zoom,
+                source.changes.zoom && target.changes.zoom,
+            ),
+            (
+                &mut self.scale_delta,
+                source.scale_delta,
+                target.scale_delta,
+                source.changes.scale_delta && target.changes.scale_delta,
+            ),
+            (
+                &mut self.opacity,
+                source.opacity,
+                target.opacity,
+                source.changes.opacity && target.changes.opacity,
+            ),
+            (
+                &mut self.spacing,
+                source.spacing,
+                target.spacing,
+                source.changes.spacing && target.changes.spacing,
+            ),
+        ] {
+            if enabled {
+                *destination = blend(start, end);
+            }
+        }
+    }
 }
 
 fn field(tables: &mut Tables, table: &Value, name: &[u8]) -> Result<Value, FaultKind> {
@@ -166,7 +262,7 @@ impl AnimationState {
             b"ui3DWindow",
         ] {
             if field(tables, table, name)? != Value::Nil {
-                return Err(FaultKind::BindingRequired);
+                return Err(FaultKind::Unknown(RENDER));
             }
         }
         Ok(Self {
