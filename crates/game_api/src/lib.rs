@@ -120,6 +120,20 @@ impl DownedRules {
     };
 }
 
+/// What a failed level does: `missionfailed()` tells every client and, once
+/// a delay has passed, loads the level again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FailedLevelRules {
+    /// The client dvar every client is sent, with its value.
+    pub client_dvar: (&'static str, &'static str),
+    /// The delay from the failure to the reload, before the death delay.
+    pub reload_delay_ms: i64,
+    /// The death delay added to it.
+    pub death_delay_ms: i64,
+    /// What failing does that is not run.
+    pub unrun: Option<&'static Unknown>,
+}
+
 /// What a game's mode asks of the code around its scripts. Staged for the
 /// match: the simulation reads it from its bootstrap, the HUD as a resource.
 #[derive(bevy_ecs::resource::Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,6 +144,8 @@ pub struct ModeRules {
     pub every_player_downs: Rule<bool>,
     /// What being down does to a player.
     pub downed: DownedRules,
+    /// What a failed level does, when the mode's scripts can fail it.
+    pub level_failed: Option<FailedLevelRules>,
     /// Whose player movement (look, walk, jump, stances, gravity, collision)
     /// moves the players.
     pub movement: Rule<MovementRules>,

@@ -177,6 +177,10 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         super::player::player(world, receiver)?;
         Ok(Value::Undefined)
     });
+    registry.register(Function, "missionfailed", |world, _, _| {
+        mission_failed(world)?;
+        Ok(Value::Undefined)
+    });
     for name in [
         "createthreatbiasgroup",
         "setthreatbias",
@@ -188,6 +192,41 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     ] {
         registry.register(Function, name, |_, _, _| Ok(Value::Undefined));
     }
+}
+
+/// Every client is sent the failure's client dvar; with a player in the level
+/// and no reload under way, the level loads again once the delay has passed.
+fn mission_failed(world: &mut World) -> Result<(), String> {
+    let rules = crate::frame::FrameWorld::from_world(world)
+        .bootstrap_ref()
+        .mode
+        .and_then(|mode| mode.level_failed)
+        .ok_or("missionfailed: this mode cannot fail its level")?;
+    let clients: Vec<u32> = world
+        .resource::<RoundScript>()
+        .players
+        .keys()
+        .copied()
+        .collect();
+    let (name, value) = rules.client_dvar;
+    for client in clients {
+        super::player::send_client_dvar(world, client, name, value);
+    }
+    if players(world).is_empty() {
+        return Ok(());
+    }
+    let now = i64::from(crate::level_time_ms(
+        world.resource::<crate::step::StepRequest>().tick,
+    ));
+    let mut runtime = world.resource_mut::<RoundScript>();
+    if !runtime.reloading {
+        runtime.reloading = true;
+        runtime.reload_after_ms = Some(now + rules.reload_delay_ms + rules.death_delay_ms);
+        if let Some(gap) = rules.unrun {
+            diag::info!(Sim, "game gap {}: {}", gap.id, gap.what);
+        }
+    }
+    Ok(())
 }
 
 fn set_invulnerable(world: &mut World, receiver: &Value, on: bool) -> Result<Value, String> {

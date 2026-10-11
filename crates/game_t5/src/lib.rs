@@ -11,8 +11,8 @@ mod zombie_startup;
 pub use menu_expression::parse_menu_expression;
 
 use game_api::{
-    DownedRules, HudRules, LibraryMode, ModeRules, MovementRules, Rule, ScriptProgram,
-    ScriptRequest, WeaponRules, unknown,
+    DownedRules, FailedLevelRules, HudRules, LibraryMode, ModeRules, MovementRules, Rule,
+    ScriptProgram, ScriptRequest, WeaponRules, unknown,
 };
 
 pub struct T5;
@@ -93,6 +93,18 @@ const ZOMBIE_MODE: ModeRules = ModeRules {
             "Black Ops' last stand and revive animation events in the runtime, its turret and vehicle detach, and what the client's down time field drives"
         )),
     },
+    // Solo game over: every client is told the level failed, and a wall-clock
+    // second plus `g_deathDelay` (4000) later the level is loaded again.
+    level_failed: Some(FailedLevelRules {
+        client_dvar: ("hud_missionFailed", "1"),
+        reload_delay_ms: 1000,
+        death_delay_ms: 4000,
+        unrun: Some(unknown!(
+            "t5.match.level_failed",
+            "a failed level loads afresh instead of restoring its level-start save, counts its delay on the match clock, and runs none of the client's fade-out: the menu event, the blur to 32 over the death delay, the timed fade from 1 to 0.1, the cleared timers, and the dead quote with its death sound",
+            "save games in the runtime (Black Ops saves the level at its start), and Black Ops' client game commands for blur, fades and the dead quote"
+        )),
+    }),
     spawn_at_default_health: true,
     connect_team: Some("allies"),
     scripts_spawn_players: true,

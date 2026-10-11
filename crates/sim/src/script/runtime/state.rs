@@ -67,6 +67,10 @@ pub(crate) struct RoundScript {
     pub(crate) current_hit: Option<crate::script_player::Hit>,
     pub(crate) deaths: VecDeque<(u32, &'static str, Vec<Value>)>,
     pub(crate) exit_level: bool,
+    /// A failed level is on its way to loading again.
+    pub(crate) reloading: bool,
+    /// The match time after which a failed level loads again.
+    pub(crate) reload_after_ms: Option<i64>,
     pub(crate) shown: BTreeMap<u64, host::presence::Shown>,
     pub(crate) retired_presence: Vec<(crate::ScriptModelId, bool)>,
     pub(crate) blasts: Vec<host::entity_damage::ScriptBlast>,
@@ -155,6 +159,8 @@ impl RoundScript {
             current_hit: Default::default(),
             deaths: Default::default(),
             exit_level: Default::default(),
+            reloading: Default::default(),
+            reload_after_ms: Default::default(),
             shown: Default::default(),
             retired_presence: Default::default(),
             blasts: Default::default(),

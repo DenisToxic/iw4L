@@ -480,6 +480,29 @@ fn run_exit_level(
     }
 }
 
+/// A failed level loads again: the current map is loaded afresh.
+fn run_level_reload(
+    mut called: MessageReader<frame::LevelReloadCalled>,
+    manifest: Option<Res<crate::SessionContentManifest>>,
+    mut transition: ResMut<SessionSwapRequest>,
+) {
+    if called.read().next().is_none() {
+        return;
+    }
+    let zone = manifest.as_ref().and_then(|manifest| match &manifest.map {
+        crate::ManifestFact::Known(map) => Some(format!("{}:{}", map.namespace.as_str(), map.name)),
+        _ => None,
+    });
+    let Some(zone) = zone else {
+        diag::info!(Sim, "session: level reload refused — no map to load");
+        return;
+    };
+    match transition.request_zone(zone.clone()) {
+        Ok(id) => diag::info!(Sim, "session: level reload → `{zone}` (swap #{id})"),
+        Err(err) => diag::info!(Sim, "session: level reload refused — {err}"),
+    }
+}
+
 fn retire_handed_over(mut retiring: ResMut<Retiring>) {
     let (batch, teardown) = retiring.take_batch();
     if batch.is_empty() {
@@ -771,6 +794,7 @@ pub fn register_lifecycle(app: &mut App) {
             (
                 follow_master_match,
                 run_exit_level,
+                run_level_reload,
                 run_peer_lobby_return,
                 run_udp_peer_lobby_return,
                 request_teardown,

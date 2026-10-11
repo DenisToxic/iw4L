@@ -9,7 +9,7 @@ This is an outline, not a specification. Each step names an outcome and how we
 know it is reached; the details are expected to change as we learn. Every step
 ends in a commit and a push.
 
-## Status (2026-10-10)
+## Status (2026-10-11)
 
 Kino loads and runs Black Ops' own zombie scripts (`_zombiemode` and
 everything it pulls in): zombies spawn behind the windows, tear the boards,
@@ -28,7 +28,9 @@ grenade bounces and fuses, blasts, damage); grenade launchers, sticky and
 special grenades are still open (`t5.weapons.fire`, `t5.weapons.grenade`).
 A zombies player goes
 down on every lethal hit and the zombie scripts run last stand, revive and
-game over (`t5.match.last_stand` keeps the down animations open). There is
+game over (`t5.match.last_stand` keeps the down animations open); a solo
+game over fails the level as Black Ops does and Kino loads again
+(`t5.match.level_failed`: no save games, no client fade-out). There is
 no HUD (`t5.hud.code_hud`, `t5.hud.menu_layout`) and no Modern Warfare 2
 sounds. The work now is
 recovering those rules from Black Ops. Start it from the game library
@@ -148,10 +150,10 @@ Done when a single zombie can be fought and killed with correct feedback.
       enforced yet). Script models play `AnimScripted` clips once.
 - [ ] Game over: a downed solo player without Quick Revive ends the game
       with the "You Survived N Rounds" screen (T5 SetText/SetHintString
-      values fill the string's `&&1`..), then the session returns to the menu.
-      Off since the game boundary: the text is a script text hud elem (not
-      drawn) and a solo `end_game` faults at `MissionFailed()`, so the session
-      stays on the intermission (ledgered).
+      values fill the string's `&&1`..), then `MissionFailed()` loads the
+      level again after a second plus the death delay, as Black Ops does
+      (`t5.match.level_failed`). The text is a script text hud elem (not
+      drawn yet).
 - [ ] Debris, Pack-a-Punch, teleporter, the remaining power-ups.
 - [ ] Last stand: every zombies player goes down; solo with Quick Revive
       revives on their own (Mustang & Sally in hand), the next down ends
