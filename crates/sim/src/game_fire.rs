@@ -169,6 +169,10 @@ impl FireWorld for MatchFireWorld<'_, '_> {
         crate::corpse::level_time_ms(self.tick)
     }
 
+    fn previous_level_time(&self) -> i32 {
+        crate::corpse::level_time_ms(crate::world::Tick(self.tick.0.saturating_sub(1)))
+    }
+
     fn dvar(&self, name: &str) -> Option<String> {
         self.world
             .ecs_ref()
@@ -517,6 +521,7 @@ impl FireWorld for MatchFireWorld<'_, '_> {
                 NotifyArg::Vector(v) => crate::script::NotifyValue::Vector(v),
                 NotifyArg::Float(f) => crate::script::NotifyValue::Float(f),
                 NotifyArg::Int(n) => crate::script::NotifyValue::Int(n),
+                NotifyArg::String(text) => crate::script::NotifyValue::String(text.to_owned()),
             })
             .collect();
         if let Some(receiver) = receiver {
@@ -613,6 +618,22 @@ impl FireWorld for MatchFireWorld<'_, '_> {
             for (v, add) in ps.velocity.iter_mut().zip(velocity) {
                 *v += add;
             }
+        }
+    }
+
+    fn bounce(&mut self, missile: i32, surface_type: u8) {
+        let Some(projectile) = self.world.projectile_by_number(missile) else {
+            return;
+        };
+        crate::equipment::push_grenade_bounce(self.world, self.tick, &projectile, surface_type);
+    }
+
+    fn store_player(&mut self, entity: i32, player: &game_api::movement::MovePlayer) {
+        let Some(id) = self.client(entity) else {
+            return;
+        };
+        if let Some(ps) = self.world.player_mut(id) {
+            ps.store_move_player(player);
         }
     }
 

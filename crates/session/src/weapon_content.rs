@@ -145,6 +145,8 @@ fn game_weapons(weapons: &WeaponRegistry) -> Vec<Option<Arc<game_api::movement::
             named_anims: bytes.named_anims,
             name: weapons.name_of(id as u32).to_owned(),
             location_damage: bytes.location_damage.map(|table| table.into()),
+            parallel_bounce: bytes.parallel_bounce.map(|table| table.into()),
+            perpendicular_bounce: bytes.perpendicular_bounce.map(|table| table.into()),
         }));
     }
     // The game's weapon 0 is its weapon named none.

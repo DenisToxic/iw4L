@@ -13,7 +13,7 @@ use game_api::{Unknown, unknown};
 use crate::fire::{DEG2RAD, Hit, MEANS, damage, hit_id};
 
 /// What a missile stops at.
-const MISSILE_MASK: u32 = 0x0280_e091;
+pub(crate) const MISSILE_MASK: u32 = 0x0280_e091;
 const CONTENTS_WATER: u32 = 0x20;
 /// Contents a missile flies through as if they were open sky.
 const CONTENTS_MISSILE_PASS: u32 = 0x800;
@@ -61,28 +61,63 @@ fn ai_missile_events_unknown() -> &'static Unknown {
 
 /// What the game keeps per missile beyond the shared fields.
 #[derive(Clone, Copy, Default)]
-struct State {
+pub(crate) struct State {
     /// How far it has flown, for its arming distance.
-    travel: f32,
-    /// It bounces (`forceBounce`).
-    bounce: bool,
+    pub(crate) travel: f32,
+    /// It bounces off what it strikes.
+    pub(crate) bounce: bool,
+    /// A grenade: it explodes on its fuse.
+    pub(crate) grenade: bool,
+    /// What it rests on; `ENTITY_NONE` while flying.
+    pub(crate) ground: i32,
+    /// When its fuse runs out; 0 for no fuse.
+    pub(crate) explode_at: i32,
+    /// A rolling grenade's wobble phase and sideways curve.
+    pub(crate) wobble: f32,
+    pub(crate) curve: f32,
+    /// The surface type it last struck.
+    pub(crate) surface: u8,
+    /// The surface it came to rest on.
+    pub(crate) rest_normal: [f32; 3],
+    pub(crate) spawned_at: i32,
 }
 
 impl State {
-    fn read(game: &[u8; GAME_MISSILE_BYTES]) -> Self {
+    pub(crate) fn read(game: &[u8; GAME_MISSILE_BYTES]) -> Self {
+        let f =
+            |at: usize| f32::from_le_bytes([game[at], game[at + 1], game[at + 2], game[at + 3]]);
+        let i =
+            |at: usize| i32::from_le_bytes([game[at], game[at + 1], game[at + 2], game[at + 3]]);
         Self {
-            travel: f32::from_le_bytes([game[0], game[1], game[2], game[3]]),
-            bounce: game[4] != 0,
+            travel: f(0),
+            bounce: game[4] & 1 != 0,
+            grenade: game[4] & 2 != 0,
+            surface: game[5],
+            ground: i(8),
+            explode_at: i(12),
+            wobble: f(16),
+            curve: f(20),
+            rest_normal: [f(24), f(28), f(32)],
+            spawned_at: i(36),
         }
     }
 
-    fn write(self, game: &mut [u8; GAME_MISSILE_BYTES]) {
+    pub(crate) fn write(self, game: &mut [u8; GAME_MISSILE_BYTES]) {
         game[0..4].copy_from_slice(&self.travel.to_le_bytes());
-        game[4] = u8::from(self.bounce);
+        game[4] = u8::from(self.bounce) | u8::from(self.grenade) << 1;
+        game[5] = self.surface;
+        game[8..12].copy_from_slice(&self.ground.to_le_bytes());
+        game[12..16].copy_from_slice(&self.explode_at.to_le_bytes());
+        game[16..20].copy_from_slice(&self.wobble.to_le_bytes());
+        game[20..24].copy_from_slice(&self.curve.to_le_bytes());
+        for (i, c) in self.rest_normal.iter().enumerate() {
+            game[24 + i * 4..28 + i * 4].copy_from_slice(&c.to_le_bytes());
+        }
+        game[36..40].copy_from_slice(&self.spawned_at.to_le_bytes());
     }
 }
 
-fn mad(base: [f32; 3], v: [f32; 3], scale: f32) -> [f32; 3] {
+pub(crate) fn mad(base: [f32; 3], v: [f32; 3], scale: f32) -> [f32; 3] {
     [
         v[0] * scale + base[0],
         v[1] * scale + base[1],
@@ -117,7 +152,7 @@ pub(crate) fn evaluate_delta(tr: &GameTrajectory, time: i32) -> [f32; 3] {
 }
 
 /// The angles a direction points at.
-fn vectoangles(v: [f32; 3]) -> [f32; 3] {
+pub(crate) fn vectoangles(v: [f32; 3]) -> [f32; 3] {
     let yaw = if v[1] == 0.0 && v[0] == 0.0 {
         0.0
     } else {
@@ -204,8 +239,10 @@ fn spawn_rocket(
     let angles = vectoangles(dir);
     let mut game = [0u8; GAME_MISSILE_BYTES];
     State {
-        travel: 0.0,
         bounce: def.force_bounce(),
+        ground: ENTITY_NONE,
+        spawned_at: level,
+        ..State::default()
     }
     .write(&mut game);
     world.spawn_missile(GameMissile {
@@ -251,29 +288,52 @@ pub(crate) fn run_missile(
         return (MissileRun::Gone, gaps);
     };
     let mut state = State::read(&missile.game);
-    if state.bounce {
-        gaps.push(missile_unknown());
-    }
     let level = world.level_time();
+    if state.grenade {
+        crate::grenade::start_falling(missile, &mut state, &def, world);
+    }
+    let run = fly(missile, &def, &mut state, level, world, &mut gaps);
+    state.write(&mut missile.game);
+    if run != MissileRun::Flying {
+        return (run, gaps);
+    }
+    if state.explode_at != 0 && state.explode_at <= level {
+        let run = crate::grenade::explode(missile, &def, &mut state, world, &mut gaps);
+        state.write(&mut missile.game);
+        return (run, gaps);
+    }
+    (run, gaps)
+}
+
+/// The missile's move this frame, into what it strikes.
+fn fly(
+    missile: &mut GameMissile,
+    def: &WeaponDefView<'_>,
+    state: &mut State,
+    level: i32,
+    world: &mut dyn FireWorld,
+    gaps: &mut Vec<&'static Unknown>,
+) -> MissileRun {
     let old = missile.origin;
     let new = evaluate(&missile.position, level);
     let d = [new[0] - old[0], new[1] - old[1], new[2] - old[2]];
     let len = (d[2] * d[2] + d[1] * d[1] + d[0] * d[0]).sqrt();
     if len < 0.00100000005 {
-        return (MissileRun::Flying, gaps);
+        return MissileRun::Flying;
     }
     if def.weapon_type() == WEAPTYPE_PROJECTILE && def.proj_explosion_type() == 9 {
         gaps.push(missile_unknown());
     }
+    let clipmask = clipmask(def);
     let mask = if len <= 20.0 || world.point_contents(old, CONTENTS_WATER) != 0 {
-        MISSILE_MASK
+        clipmask
     } else {
-        MISSILE_MASK | CONTENTS_WATER
+        clipmask | CONTENTS_WATER
     };
     let mut trace = missile_trace(old, new, missile.owner, mask, world);
     if surface_type(&trace) == SURF_WATER {
         gaps.push(missile_water_unknown());
-        trace = missile_trace(old, new, missile.owner, MISSILE_MASK, world);
+        trace = missile_trace(old, new, missile.owner, clipmask, world);
     }
     if surface_type(&trace) == SURF_GLASS {
         gaps.push(missile_glass_unknown());
@@ -289,7 +349,6 @@ pub(crate) fn run_missile(
         let m = [end[0] - old[0], end[1] - old[1], end[2] - old[2]];
         state.travel += (m[2] * m[2] + m[1] * m[1] + m[0] * m[0]).sqrt();
     }
-    state.write(&mut missile.game);
     if f == 1.0 {
         if def.destabilize_distance() > 0 && def.destabilization_rate_time() != 0.0 {
             gaps.push(missile_unknown());
@@ -297,22 +356,31 @@ pub(crate) fn run_missile(
     } else {
         if trace.surface_flags & SURF_SKY != 0 || trace.contents & CONTENTS_MISSILE_PASS != 0 {
             missile.origin = new;
-            return (MissileRun::Flying, gaps);
+            return MissileRun::Flying;
         }
         let inv = 1.0 / if -len >= 0.0 { 1.0 } else { len };
         let dir = [d[0] * inv, d[1] * inv, d[2] * inv];
-        if let Some(run) = impact(missile, &def, &trace, dir, end, state, world, &mut gaps) {
-            return (run, gaps);
+        if let Some(run) = impact(missile, def, &trace, dir, end, state, world, gaps) {
+            return run;
         }
     }
     if !in_world(missile.origin, world.map_center()) {
-        return (MissileRun::Gone, gaps);
+        return MissileRun::Gone;
     }
-    (MissileRun::Flying, gaps)
+    MissileRun::Flying
+}
+
+/// What a missile of this weapon stops at: plantables stop at more.
+pub(crate) fn clipmask(def: &WeaponDefView<'_>) -> u32 {
+    if def.plantable() {
+        MISSILE_MASK | 0x0001_0000
+    } else {
+        MISSILE_MASK
+    }
 }
 
 /// A missile's trace; from inside a solid, it reports the way it came.
-fn missile_trace(
+pub(crate) fn missile_trace(
     start: [f32; 3],
     end: [f32; 3],
     owner: i32,
@@ -331,12 +399,12 @@ fn missile_trace(
     trace
 }
 
-fn surface_type(trace: &BulletTrace) -> i32 {
+pub(crate) fn surface_type(trace: &BulletTrace) -> i32 {
     (trace.surface_flags >> 20) as i32 & 0x3f
 }
 
 /// Within the bounds a missile may fly from the map's centre.
-fn in_world(at: [f32; 3], center: [f32; 3]) -> bool {
+pub(crate) fn in_world(at: [f32; 3], center: [f32; 3]) -> bool {
     let reach_z = (1 << 16) as f32;
     let reach = (1 << 17) as f32;
     let (x, y, z) = (at[0] as i32, at[1] as i32, at[2] as i32);
@@ -357,7 +425,7 @@ fn impact(
     trace: &BulletTrace,
     dir: [f32; 3],
     end: [f32; 3],
-    state: State,
+    state: &mut State,
     world: &mut dyn FireWorld,
     gaps: &mut Vec<&'static Unknown>,
 ) -> Option<MissileRun> {
@@ -365,6 +433,7 @@ fn impact(
         gaps.push(missile_glass_unknown());
         return None;
     }
+    state.surface = surface_type(trace) as u8;
     let target = hit_id(trace);
     let level = world.level_time();
     let unarmed =
@@ -402,9 +471,21 @@ fn impact(
         );
     }
     if !explodes {
-        // A missile that does not explode on impact bounces or sticks.
-        gaps.push(missile_unknown());
-        return Some(MissileRun::Gone);
+        if unarmed {
+            // A dud: it falls dead where it strikes.
+            gaps.push(missile_unknown());
+            return Some(MissileRun::Gone);
+        }
+        if state.bounce && !def.proj_impact_explode() {
+            if def.weapon_type() == WEAPTYPE_PROJECTILE {
+                // A bouncing projectile may explode on a steep enough strike.
+                gaps.push(missile_unknown());
+            }
+            crate::grenade::bounce(missile, def, state, trace, end, world, gaps);
+        } else {
+            gaps.push(missile_unknown());
+        }
+        return None;
     }
     if amount != 0 {
         world.damage_triggers(missile.owner, missile.origin, end, amount, MEANS[means]);

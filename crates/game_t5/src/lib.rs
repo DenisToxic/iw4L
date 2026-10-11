@@ -1,5 +1,6 @@
 mod catalog;
 mod fire;
+mod grenade;
 mod menu_expression;
 mod missile;
 mod movement;

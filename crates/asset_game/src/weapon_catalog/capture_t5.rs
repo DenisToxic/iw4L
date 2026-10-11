@@ -877,6 +877,8 @@ pub(super) fn capture_t5_body_facts(
                 body,
                 sz::WEAPON_DEF_LOCATION_DAMAGE_OFF,
             ),
+            parallel_bounce: facts.parallel_bounce,
+            perpendicular_bounce: facts.perpendicular_bounce,
         }))
     });
     (facts, game_bytes)
