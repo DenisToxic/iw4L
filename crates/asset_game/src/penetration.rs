@@ -40,7 +40,8 @@ pub fn capture_pen_table(
     data: &[u8],
     zlib_compressed: bool,
 ) -> Option<PenetrationDepthTable> {
-    if name != "info/bullet_penetration_mp" {
+    // Multiplayer's table, and Black Ops' singleplayer one its zombie maps use.
+    if name != "info/bullet_penetration_mp" && name != "info/bullet_penetration_sp" {
         return None;
     }
     let mut bytes = if zlib_compressed {

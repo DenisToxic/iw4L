@@ -1,0 +1,338 @@
+//! A game's own shots in the match: the bullet traces, entities, damage and
+//! notifies its server fire rules ask for, through the runtime's collision
+//! and script host.
+
+use crate::bullet_collision::{BulletTraceQuery, ColliderId, LagcompQuery, TraceOutcome};
+use crate::frame::FrameWorld;
+use crate::identities::ShotId;
+use crate::world::{ClientId, Tick};
+use crate::{ScriptModelId, SimContent};
+use game_api::fire::{
+    BulletHitType, BulletImpact, BulletTrace, FireDamage, FireEntity, FireEntityKind, FireTeam,
+    FireWorld,
+};
+use game_api::movement::{ENTITY_NONE, ENTITY_WORLD, GameWeapon};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+/// The match around one player's shots in one command.
+pub(crate) struct MatchFireWorld<'w, 'a> {
+    world: &'w mut FrameWorld<'a>,
+    content: Arc<SimContent>,
+    tick: Tick,
+    attacker: ClientId,
+    query: LagcompQuery,
+    shot: ShotId,
+    segment: u16,
+    /// Script entities the traces reached, by the number the game knows.
+    models: Vec<(i32, ScriptModelId)>,
+}
+
+impl<'w, 'a> MatchFireWorld<'w, 'a> {
+    pub(crate) fn new(world: &'w mut FrameWorld<'a>, tick: Tick, attacker: ClientId) -> Self {
+        world.record_collision_history(tick, 0, None);
+        world.record_entity_collision_history(tick);
+        let query = world.lagcomp_query_for(attacker, tick);
+        let shot = world.alloc_shot_id();
+        Self {
+            content: world.content(),
+            world,
+            tick,
+            attacker,
+            query,
+            shot,
+            segment: 0,
+            models: Vec::new(),
+        }
+    }
+
+    fn model(&self, entity: i32) -> Option<ScriptModelId> {
+        self.models
+            .iter()
+            .find(|(number, _)| *number == entity)
+            .map(|(_, id)| *id)
+    }
+
+    fn client(&self, entity: i32) -> Option<ClientId> {
+        let id = ClientId(u32::try_from(entity).ok()?);
+        self.world.player(id).is_some().then_some(id)
+    }
+
+    /// The number the game knows a script entity by.
+    fn number_of(&mut self, id: ScriptModelId) -> i32 {
+        let number = self.world.gentity_number(id).unwrap_or(ENTITY_NONE);
+        if number != ENTITY_NONE && self.model(number).is_none() {
+            self.models.push((number, id));
+        }
+        number
+    }
+
+    fn trace_of(&mut self, outcome: TraceOutcome) -> BulletTrace {
+        let (fraction, normal, collider, start_solid, all_solid) = match outcome {
+            TraceOutcome::Miss { .. } | TraceOutcome::Invalid { .. } => {
+                return BulletTrace {
+                    fraction: 1.0,
+                    ..BulletTrace::default()
+                };
+            }
+            TraceOutcome::Hit {
+                fraction,
+                normal,
+                collider,
+                ..
+            } => (fraction, normal, Some(collider), false, false),
+            TraceOutcome::StartSolid {
+                collider,
+                all_solid,
+                ..
+            } => (0.0, [0.0; 3], collider, true, all_solid),
+        };
+        let mut trace = BulletTrace {
+            fraction,
+            normal,
+            start_solid,
+            all_solid,
+            ..BulletTrace::default()
+        };
+        match collider {
+            None => trace.hit = BulletHitType::Entity(ENTITY_WORLD),
+            Some(ColliderId::World {
+                surface_flags,
+                glass_encoded,
+                ..
+            }) => {
+                trace.surface_flags = surface_flags;
+                trace.hit = match glass_encoded {
+                    0 => BulletHitType::Entity(ENTITY_WORLD),
+                    encoded => BulletHitType::Glass(i32::from(encoded) - 1),
+                };
+            }
+            Some(ColliderId::Player { client, hitloc, .. }) => {
+                trace.hit = BulletHitType::Entity(client.0 as i32);
+                trace.hit_location = i32::from(hitloc);
+            }
+            Some(ColliderId::EntityDObjBone {
+                owner,
+                bone,
+                part_classification,
+                surface_flags,
+            }) => {
+                trace.surface_flags = surface_flags;
+                trace.hit_location = i32::from(part_classification);
+                trace.bone = Some(bone);
+                trace.hit = match owner.script_model() {
+                    Some(id) => BulletHitType::Entity(self.number_of(id)),
+                    None => BulletHitType::Entity(ENTITY_WORLD),
+                };
+            }
+            Some(ColliderId::EntityLinkedBrush {
+                owner,
+                surface_flags,
+                ..
+            }) => {
+                trace.surface_flags = surface_flags;
+                trace.hit = match owner.script_model() {
+                    Some(id) => BulletHitType::Entity(self.number_of(id)),
+                    None => BulletHitType::Entity(ENTITY_WORLD),
+                };
+            }
+        }
+        trace
+    }
+}
+
+fn team_of(name: Option<&str>) -> Option<FireTeam> {
+    match name? {
+        "axis" => Some(FireTeam::Axis),
+        "allies" => Some(FireTeam::Allies),
+        "neutral" => Some(FireTeam::Neutral),
+        _ => None,
+    }
+}
+
+impl FireWorld for MatchFireWorld<'_, '_> {
+    fn level_time(&self) -> i32 {
+        crate::corpse::level_time_ms(self.tick)
+    }
+
+    fn dvar(&self, name: &str) -> Option<String> {
+        self.world
+            .ecs_ref()
+            .get_resource::<crate::script::MatchScript>()?
+            .dvars
+            .get(name)
+            .cloned()
+    }
+
+    fn weapon(&self, weapon: u32) -> Option<&GameWeapon> {
+        self.content.game_weapon(weapon)
+    }
+
+    fn bullet_trace(
+        &mut self,
+        start: [f32; 3],
+        end: [f32; 3],
+        pass_entity: i32,
+        mask: u32,
+    ) -> BulletTrace {
+        let glass: HashMap<u32, u16> = self
+            .world
+            .world_objects()
+            .glass_damage_pairs()
+            .into_iter()
+            .collect();
+        let outcome = crate::bullet_collision::bullet_trace_with_entity_models(
+            self.world.clip_brushes(),
+            self.world.clip_bsp(),
+            self.world.clip_cmodels(),
+            self.world.clip_mesh(),
+            &self.query.players.poses,
+            &self.query.entities.rows,
+            &BulletTraceQuery {
+                start,
+                end,
+                mask,
+                ignore: self.client(pass_entity),
+                ignore_hit: None,
+                ignore_model: self.model(pass_entity),
+            },
+            &|piece| {
+                crate::world_objects::glass_piece_is_solid(
+                    glass.get(&u32::from(piece)).copied().unwrap_or(0),
+                )
+            },
+        );
+        self.trace_of(outcome)
+    }
+
+    fn entity(&mut self, entity: i32) -> Option<FireEntity> {
+        if let Some(client) = self.client(entity) {
+            let meta = self.world.client_meta(client)?;
+            let alive = meta.lifecycle == crate::match_state::ClientLifecycle::Alive;
+            return Some(FireEntity {
+                kind: FireEntityKind::Player,
+                takes_damage: alive,
+                health: self.world.player(client).map_or(0, |ps| ps.health),
+                team: team_of(crate::spawn::team_name(meta.client_state_team)),
+                ignore_locational_damage: false,
+                allow_death: true,
+                god: false,
+                demigod: false,
+                ai_type: None,
+            });
+        }
+        let id = self.model(entity)?;
+        let target = crate::script::shot_target(self.world.ecs(), id)?;
+        Some(FireEntity {
+            kind: if target.actor {
+                FireEntityKind::Actor
+            } else {
+                FireEntityKind::Other
+            },
+            takes_damage: target.takes_damage,
+            health: target.health,
+            team: team_of(target.team),
+            ignore_locational_damage: target.ignore_locational_damage,
+            allow_death: target.allow_death,
+            god: false,
+            demigod: false,
+            ai_type: target.ai_type,
+        })
+    }
+
+    fn penetration_depth(&self, penetrate_type: i32, surface_type: i32) -> Option<f32> {
+        if !self.world.pen_table_loaded() {
+            return None;
+        }
+        Some(
+            self.world
+                .penetration_table()
+                .depth(penetrate_type, u32::try_from(surface_type).ok()?),
+        )
+    }
+
+    fn hit_location_multiplier(&self, hit_location: i32) -> Option<f32> {
+        self.content
+            .hit_location_multiplier(usize::try_from(hit_location).ok()?)
+    }
+
+    fn damage(&mut self, damage: &FireDamage) {
+        let Some(target) = self.model(damage.target) else {
+            return;
+        };
+        let attacker = self.client(damage.attacker);
+        crate::script::damage_entity(
+            self.world.ecs(),
+            &crate::script::EntityHit {
+                target,
+                amount: damage.amount,
+                attacker,
+                means: damage.means,
+                weapon: damage.weapon,
+                point: damage.point,
+                dir: damage.dir,
+                bone: damage.bone.map(usize::from),
+                flags: damage.flags,
+                hit_location: Some(damage.hit_location),
+            },
+        );
+    }
+
+    fn damage_triggers(
+        &mut self,
+        attacker: i32,
+        start: [f32; 3],
+        end: [f32; 3],
+        amount: i32,
+        means: &'static str,
+    ) {
+        let Some(client) = self.client(attacker) else {
+            return;
+        };
+        crate::script::host::triggers::damage_line(
+            self.world.ecs(),
+            start,
+            end,
+            amount,
+            client,
+            None,
+            means,
+        );
+    }
+
+    fn impact(&mut self, impact: &BulletImpact) {
+        let segment = self.segment;
+        self.segment = self.segment.saturating_add(1);
+        let mut surface_flags = impact.surface_flags;
+        if impact.exit {
+            surface_flags |= crate::combat::IMPACT_EXIT_SURFACE;
+        }
+        self.world.push_pellet_fx(crate::PelletFxRecord {
+            attacker: impact.attacker,
+            weapon: impact.weapon,
+            correlation: self.shot.0,
+            fire_cause: None,
+            pellet: 0,
+            segment,
+            hand: 0,
+            start: impact.start,
+            end: impact.point,
+            normal: impact.normal,
+            surf_type: impact.surface_type,
+            surface_flags,
+            flesh_flags: if impact.entity == ENTITY_NONE {
+                0
+            } else {
+                impact.flags & 0x3
+            },
+        });
+    }
+
+    fn notify(&mut self, entity: i32, name: &str, weapon: Option<u32>) {
+        let Some(client) = self.client(entity) else {
+            return;
+        };
+        let weapon = weapon.map(|w| crate::script_player::weapon_name(self.world, w));
+        crate::script::notify_player(self.world.ecs(), client.0, name, weapon.as_deref());
+    }
+}

@@ -1149,6 +1149,9 @@ pub fn spread_direction_on_plane(
     }
 }
 
+/// The surface flag an impact where a bullet left a surface carries.
+pub(crate) const IMPACT_EXIT_SURFACE: u32 = fx_iw4::FX_IMPACT_EXIT_SURFACE_FLAG;
+
 pub(crate) fn phase_emit(world: &FrameWorld, shots: &[AcceptedShot]) -> Vec<Emission> {
     let mut out = Vec::new();
     for shot in shots {
@@ -1355,7 +1358,7 @@ pub(crate) fn phase_trace(
             *ordinal = ordinal
                 .checked_add(1)
                 .expect("bullet segment count exceeds wire limit");
-            let exit = segment.surface_flags & fx_iw4::FX_IMPACT_EXIT_SURFACE_FLAG != 0;
+            let exit = segment.surface_flags & IMPACT_EXIT_SURFACE != 0;
             let dist = {
                 let dx = segment.end[0] - em.origin[0];
                 let dy = segment.end[1] - em.origin[1];
@@ -1562,6 +1565,7 @@ pub(crate) fn phase_trace(
                                 dir: em.direction,
                                 bone,
                                 flags: 0,
+                                hit_location: None,
                             },
                         );
                     }
@@ -1789,6 +1793,7 @@ fn fire_weapon_melee(
                         dir: forward,
                         bone,
                         flags: 0,
+                        hit_location: None,
                     },
                 );
                 if damaged && usize::from(segment.surf_type) == fx_iw4::FX_SURF_TYPE_FLESH {

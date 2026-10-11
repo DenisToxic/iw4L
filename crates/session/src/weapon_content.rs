@@ -99,8 +99,14 @@ pub(crate) fn compile(
         .then(|| weapons.rank_progression())
         .transpose()
         .map_err(|_| sim::SimWeaponContentRefusal::InvalidProgression)?;
-    let content =
-        sim::SimWeaponContent::compile(rows, aliases, pen_table, pen_table_loaded, ranks)?;
+    let content = sim::SimWeaponContent::compile(
+        rows,
+        aliases,
+        pen_table,
+        pen_table_loaded,
+        global_location,
+        ranks,
+    )?;
     if !refused.is_empty() {
         diag::info!(
             Sim,
@@ -138,6 +144,7 @@ fn game_weapons(weapons: &WeaponRegistry) -> Vec<Option<Arc<game_api::movement::
             dual_wield_weapon: weapon.dual_wield_wire_id(),
             named_anims: bytes.named_anims,
             name: weapons.name_of(id as u32).to_owned(),
+            location_damage: bytes.location_damage.map(|table| table.into()),
         }));
     }
     // The game's weapon 0 is its weapon named none.
