@@ -162,6 +162,7 @@ const ZOMBIES_MODE: ModeRules = ModeRules {
         "Black Ops 3's down rule"
     )),
     downed: game_api::DownedRules::BRIEFLY_IMMUNE,
+    level_failed: None,
     movement: Rule::Unknown(unknown!(
         "t7.movement.player",
         "Black Ops 3's player movement: look, walk, sprint, jump, slide, stances, gravity, collision",

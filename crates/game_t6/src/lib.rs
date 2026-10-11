@@ -200,6 +200,7 @@ const MULTIPLAYER_MODE: ModeRules = ModeRules {
     play_starts_on: "prematch_over",
     every_player_downs: Rule::Known(false),
     downed: game_api::DownedRules::BRIEFLY_IMMUNE,
+    level_failed: None,
     movement: Rule::Unknown(unknown!(
         "t6.movement.player",
         "Black Ops 2's player movement",

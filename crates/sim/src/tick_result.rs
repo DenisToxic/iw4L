@@ -62,4 +62,6 @@ pub struct TickResult {
     pub pending_final_kill: Option<(ClientId, ClientId)>,
     pub script_seats: Vec<(ClientId, crate::ScriptSeat)>,
     pub script_exit_level: bool,
+    /// A failed level's delay has passed: the level loads again.
+    pub level_reload_due: bool,
 }

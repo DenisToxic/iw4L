@@ -853,6 +853,13 @@ fn publish_snapshot_system(ecs: &mut World) {
     let script_seats = crate::script::script_seats(ecs);
     let mut runtime = ecs.resource_mut::<crate::script::RoundScript>();
     let script_exit_level = std::mem::take(&mut runtime.exit_level);
+    // A failed level loads again once the match clock is past its delay.
+    let level_reload_due = runtime
+        .reload_after_ms
+        .is_some_and(|after| i64::from(crate::level_time_ms(tick)) > after);
+    if level_reload_due {
+        runtime.reload_after_ms = None;
+    }
     effects.kicks = std::mem::take(&mut runtime.kicks)
         .into_iter()
         .map(|(client, reason)| (ClientId(client), reason))
@@ -871,6 +878,7 @@ fn publish_snapshot_system(ecs: &mut World) {
         pending_final_kill,
         script_seats,
         script_exit_level,
+        level_reload_due,
     });
 }
 

@@ -67,6 +67,15 @@ fn client_dvar_value(value: &Value, params: &[Value]) -> Result<String, String> 
     Ok(out)
 }
 
+/// A dvar set on one client by the engine rather than by a script call.
+pub(crate) fn send_client_dvar(world: &mut World, client: u32, name: &str, value: &str) {
+    let name: Arc<str> = name.to_ascii_lowercase().into();
+    if let Ok(slot) = slot(world, client) {
+        slot.dvars.insert(name.clone(), value.into());
+    }
+    publish_client_dvar(world, client, &name, value.to_owned());
+}
+
 fn publish_client_dvar(world: &mut World, client: u32, name: &str, value: String) {
     let value = if let Some(setting) = crate::TargetBoxDvar::named(name) {
         let Some(value) = setting.parse(&value) else {
