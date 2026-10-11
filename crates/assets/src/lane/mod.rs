@@ -411,3 +411,59 @@ impl LoadedWorld {
         }
     }
 }
+
+/// The compiled scripts a map runs as they are: the zones its game's script
+/// format names, in load order, then the downloaded patches the owner
+/// captured, a later zone's module replacing an earlier one's.
+pub(crate) fn capture_script_zones(
+    path: &Path,
+    image: &ZoneImage,
+    captured: Vec<std::path::PathBuf>,
+    scripts: &mut crate::ScriptSources,
+    report: &mut Vec<String>,
+) {
+    let Some(format) = asset_transport::registered_script_zone_format(image.game) else {
+        return;
+    };
+    let map = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    let zones = (format.script_zones)(map);
+    if zones.is_empty() {
+        return;
+    }
+    let files = zones
+        .iter()
+        .map(|zone| (zone.as_str() != map).then(|| path.with_file_name(format!("{zone}.ff"))))
+        .chain(captured.into_iter().map(Some));
+    for file in files {
+        let opened;
+        let (name, bytes) = match &file {
+            None => (map.to_owned(), &image.bytes),
+            Some(file) if !file.is_file() => continue,
+            Some(file) => match asset_transport::open_zone(file) {
+                Ok(zone) => {
+                    opened = zone;
+                    (file.display().to_string(), &opened.bytes)
+                }
+                Err(error) => {
+                    report.push(format!("scripts: {}: {error}", file.display()));
+                    continue;
+                }
+            },
+        };
+        let found = (format.scripts)(bytes);
+        report.push(format!("scripts: {name}: {} modules", found.modules.len()));
+        report.extend(found.report);
+        for (module, bytes) in found.modules {
+            scripts.capture_module(&module, bytes);
+        }
+        for (file, text) in found.configs {
+            scripts.capture_config(&file, text);
+        }
+        for table in found.tables {
+            scripts.capture_zone_table(table);
+        }
+    }
+}

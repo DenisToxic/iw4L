@@ -12,6 +12,10 @@ pub(crate) fn active(world: &World) -> bool {
         .program
         .as_ref()
         .is_some_and(|p| p.rules() == Realm::T6)
+        && world
+            .get::<crate::world::SimState>(crate::frame::state_entity(world))
+            .and_then(|state| state.bootstrap_ref().mode)
+            .is_some_and(|mode| mode.host_rules)
 }
 
 fn respawn_due(lifecycle: ClientLifecycle, dead_since: Option<u32>, tick: Tick) -> bool {

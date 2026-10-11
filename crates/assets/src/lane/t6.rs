@@ -2793,6 +2793,13 @@ impl ZoneLane for T6Lane {
             };
             let mut scripts = crate::ScriptSources::default();
             scripts.set_entities(entities.clone());
+            super::capture_script_zones(
+                path,
+                image,
+                mode.captured_patches(),
+                &mut scripts,
+                &mut report,
+            );
             let light_grid = asset_world::world_t6::light_grid(&load, world_asset)
                 .map_err(|e| report.push(format!("T6 light grid: {e}")))
                 .ok();

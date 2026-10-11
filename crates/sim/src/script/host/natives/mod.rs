@@ -8,4 +8,5 @@ pub(crate) mod shared;
 pub(crate) mod skill;
 pub mod t5;
 pub(crate) mod t5_zombie;
+pub(crate) mod t6;
 pub(crate) mod t7;

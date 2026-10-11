@@ -175,7 +175,7 @@ pattern crates/asset_game/src/weapon_catalog/registry.rs AssetNamespace::<game> 
 pattern crates/asset_game/src/weapon_catalog/registry.rs gamemode_iw4:: 7
 pattern crates/asset_game/src/weapon_families.rs AssetNamespace::<game> 7
 pattern crates/asset_game/src/weapon_semantics.rs AssetNamespace::<game> 3
-pattern crates/asset_game/src/weapon_t6.rs fastfile_t6:: 5
+pattern crates/asset_game/src/weapon_t6.rs fastfile_t6:: 3
 pattern crates/asset_material/src/iw5_tech_map.rs asset_iw4:: 1
 pattern crates/asset_material/src/iw5_tech_map.rs fastfile_iw5:: 1
 pattern crates/asset_material/src/material_bindings/mod.rs lighting_iw4:: 3

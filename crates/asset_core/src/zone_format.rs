@@ -154,7 +154,29 @@ pub struct ZoneScripts {
     pub modules: Vec<(String, Vec<u8>)>,
     /// Config raw files (`….cfg`) and their text.
     pub configs: Vec<(String, String)>,
+    pub tables: Vec<ZoneTable>,
     pub report: Vec<String>,
+}
+
+/// A string table a zone carries: its name and cells, row by row.
+#[derive(Clone, Debug, Default)]
+pub struct ZoneTable {
+    pub name: String,
+    pub columns: usize,
+    pub rows: usize,
+    pub cells: Vec<String>,
+}
+
+/// Where a game whose zones `asset_transport` opens itself keeps the compiled
+/// scripts its maps run as they are.
+#[derive(Clone, Copy)]
+pub struct ScriptZoneFormat {
+    pub game: FamilyId,
+    /// The zones whose scripts a map runs, the map's own among them, in load
+    /// order: a later zone's module replaces an earlier one's.
+    pub script_zones: fn(&str) -> Vec<String>,
+    /// The compiled modules, configs and tables a decoded zone carries.
+    pub scripts: fn(&[u8]) -> ZoneScripts,
 }
 
 impl ZoneFormat {

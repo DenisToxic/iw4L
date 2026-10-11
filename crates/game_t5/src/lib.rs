@@ -57,6 +57,7 @@ impl game_api::GameScripts for T5 {
             built: None,
             settings: Vec::new(),
             key_types: Vec::new(),
+            dvars: Vec::new(),
         })
     }
 
@@ -94,6 +95,7 @@ const ZOMBIE_MODE: ModeRules = ModeRules {
     waits_for_lobby: true,
     binds_account: false,
     binds_objectives: false,
+    host_rules: false,
     hud: HudRules {
         code_hud: Rule::Unknown(unknown!(
             "t5.hud.code_hud",
