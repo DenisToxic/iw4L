@@ -93,6 +93,11 @@ OxideAV WMA — https://github.com/OxideAV/oxideav-wma
   Evaluated and read as a reference for WMA2 decoding. No source is vendored
   or compiled into IW4L.
 
+CoDHVKDecompiler - https://github.com/Deewarz/CoDHVKDecompiler
+  Read as a reference for the compiled BO2 HavokScript container while
+  inspecting locally installed UI modules. No source or game script output
+  from this project is distributed or linked. Licensed under MIT.
+
 --------------------------------------------------------------------------------
 Game content
 --------------------------------------------------------------------------------

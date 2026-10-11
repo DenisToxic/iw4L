@@ -147,38 +147,6 @@ fn spawn(mut commands: Commands, font: Res<GameUiFont>, existing: Query<Entity, 
                     Val::Percent(100.0),
                 ),
                 (
-                    HudArt::Perk(0),
-                    Val::Px(32.0),
-                    Val::Auto,
-                    Val::Px(180.0),
-                    Val::Px(38.0),
-                    Val::Px(38.0),
-                ),
-                (
-                    HudArt::Perk(1),
-                    Val::Px(76.0),
-                    Val::Auto,
-                    Val::Px(180.0),
-                    Val::Px(38.0),
-                    Val::Px(38.0),
-                ),
-                (
-                    HudArt::Perk(2),
-                    Val::Px(120.0),
-                    Val::Auto,
-                    Val::Px(180.0),
-                    Val::Px(38.0),
-                    Val::Px(38.0),
-                ),
-                (
-                    HudArt::Perk(3),
-                    Val::Px(164.0),
-                    Val::Auto,
-                    Val::Px(180.0),
-                    Val::Px(38.0),
-                    Val::Px(38.0),
-                ),
-                (
                     HudArt::Powerup(0),
                     Val::Percent(45.0),
                     Val::Auto,
@@ -208,6 +176,24 @@ fn spawn(mut commands: Commands, font: Res<GameUiFont>, existing: Query<Entity, 
                         bottom,
                         width,
                         height,
+                        display: Display::None,
+                        ..default()
+                    },
+                ));
+            }
+            for index in 0..12 {
+                root.spawn((
+                    HudArt::Perk(index),
+                    ImageNode {
+                        image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                        ..default()
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(32.0 + f32::from(index) * 44.0),
+                        bottom: Val::Px(180.0),
+                        width: Val::Px(36.0),
+                        height: Val::Px(36.0),
                         display: Display::None,
                         ..default()
                     },
@@ -592,7 +578,13 @@ fn refresh(
                 }
             }
             Field::Weapon if alive && !scores => name.clone(),
-            Field::Ammo if alive && !scores => format!("{clip:02}  /  {stock:03}"),
+            Field::Ammo if alive && !scores => {
+                if snapshot.meta.kind.token() == "zclassic" {
+                    format!("{clip}/{stock}")
+                } else {
+                    format!("{clip:02}  /  {stock:03}")
+                }
+            }
             Field::Health if alive && !scores && ps.health < ps.max_health => {
                 format!("HEALTH {}", ps.health)
             }
@@ -759,6 +751,10 @@ fn refresh_art(
                         "deadshot" => Some("specialty_ads_zombies"),
                         "mulekick" => Some("specialty_additionalprimaryweapon_zombies"),
                         "phd" => Some("specialty_divetonuke_zombies"),
+                        "tombstone" => Some("specialty_tombstone_zombies"),
+                        "whoswho" => Some("specialty_chugabud_zombies"),
+                        "electriccherry" => Some("specialty_electric_cherry_zombie"),
+                        "vultureaid" => Some("specialty_vulture_zombies"),
                         _ => None,
                     })
                     .and_then(|material| art.image(material, &mut images))

@@ -2,6 +2,7 @@ mod builtins;
 mod keys;
 mod script_zones;
 mod startup;
+pub mod ui;
 
 use game_api::{HudRules, LibraryMode, ModeRules, Rule, ScriptProgram, ScriptRequest, unknown};
 

@@ -34,3 +34,19 @@ Layouts are IW4L-owned; BO2 LUI scripts and the multiplayer minimap remain absen
 
 Hosts can return everyone to the existing lobby with **End Match**.
 **Leave Match** disconnects only the local player.
+
+Zombies perk icons have twelve slots and use the installed BO2 perk materials,
+including Electric Cherry, Vulture Aid and Who's Who. Icon size and spacing
+follow the authored perk module; safe-area placement, split-screen scaling,
+perk acquisition animations and native client-field state remain unfinished.
+Zombies ammo uses the authored unpadded clip/stock label; dual-wield ammo
+and native multiplayer HUD digits remain unfinished.
+
+UI preparation decodes installed PC HavokScript modules and literal material names,
+including patch-zone HUD/menu artwork. The runtime supports scalar instructions,
+tables, userdata metatables, closures, host calls, basic library functions, owned
+elements/animation states with shared state metatables, scalar state
+registration/application, immediate transitions, script completion callbacks and
+cache control. Timed transitions, protected callback errors, remaining engine
+methods, collection, full libraries, rendered LUI and dynamic material names remain
+unfinished. No game scripts are bundled.

@@ -1073,7 +1073,8 @@ fn capture_weapon_icons(
         .collect();
     let mut icons = Vec::new();
     let mut failed = Vec::new();
-    let all: Vec<&fastfile_t6::ZoneLoad> = loads.iter().copied().chain(&extra).collect();
+    let all: Vec<&fastfile_t6::ZoneLoad> = extra.iter().chain(loads.iter().copied()).collect();
+    let mut seen_fonts = std::collections::BTreeSet::new();
     let fonts: Vec<_> = all
         .iter()
         .flat_map(|load| {
@@ -1081,7 +1082,30 @@ fn capture_weapon_icons(
                 .iter()
                 .filter_map(|asset| capture_ui_font(load, asset))
         })
+        .filter(|font| seen_fonts.insert(font.name.to_ascii_lowercase()))
         .collect();
+    let mut ui_strings = std::collections::BTreeSet::new();
+    let mut material_names = std::collections::BTreeSet::new();
+    let mut ui_modules = 0usize;
+    for load in &all {
+        let literals = load.ui_literals();
+        ui_modules += literals.modules;
+        ui_strings.extend(literals.strings);
+        material_names.extend(literals.materials);
+        report.extend(
+            literals
+                .errors
+                .into_iter()
+                .map(|error| format!("t6 UI literal capture refused: {error:?}")),
+        );
+    }
+    let ui_materials: std::collections::BTreeSet<_> =
+        material_names.intersection(&ui_strings).cloned().collect();
+    report.push(format!(
+        "t6 UI: {ui_modules} bytecode modules decoded; {} material names matched",
+        ui_materials.len()
+    ));
+    wanted.extend(ui_materials);
     wanted.extend(fonts.iter().map(|font| font.material.clone()));
     report.push(format!(
         "t6 UI fonts: {} native bitmap fonts captured",
@@ -1093,14 +1117,15 @@ fn capture_weapon_icons(
                 continue;
             }
             let Some(name) = header_str(load, &asset.header, 0)
-                .map(|name| name.trim_start_matches(',').to_ascii_lowercase())
+                .filter(|name| !name.starts_with(','))
+                .map(str::to_ascii_lowercase)
             else {
                 continue;
             };
             let presentation = name.starts_with("loadscreen_mp_")
                 || name.starts_with("faction_")
                 || name.starts_with("hud_chalk_")
-                || (name.starts_with("specialty_") && name.contains("_zombies"))
+                || (name.starts_with("specialty_") && name.contains("_zombie"))
                 || matches!(
                     name.as_str(),
                     "scorebar_zom_1"
