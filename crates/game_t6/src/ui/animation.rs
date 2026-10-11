@@ -22,6 +22,77 @@ pub struct AnimationState {
     pub spacing: Option<f32>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AnimationStep {
+    Interpolate(f32),
+    Complete { lateness: f32, interrupted: bool },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AnimationTimer {
+    duration: i32,
+    remaining: i32,
+    options: [bool; 2],
+}
+
+impl AnimationTimer {
+    pub fn new(duration: i32, options: [bool; 2]) -> Self {
+        Self {
+            duration,
+            remaining: duration,
+            options,
+        }
+    }
+
+    pub fn remaining(&self) -> i32 {
+        self.remaining
+    }
+
+    pub fn advance_clocks(
+        &mut self,
+        game_elapsed: i32,
+        real_elapsed: i32,
+        use_game_time: bool,
+    ) -> AnimationStep {
+        self.advance(if use_game_time {
+            game_elapsed
+        } else {
+            real_elapsed
+        })
+    }
+
+    pub fn advance(&mut self, elapsed: i32) -> AnimationStep {
+        if self.remaining > 0 {
+            self.remaining = self.remaining.wrapping_sub(elapsed);
+            let fraction = (1.0 - self.remaining as f32 / self.duration as f32).min(1.0);
+            let fraction = if (self.options[0] && fraction < 0.5)
+                || (self.options[1] && fraction > 0.5)
+            {
+                ((fraction * std::f32::consts::PI + std::f32::consts::PI * 1.5).sin() + 1.0) * 0.5
+            } else {
+                fraction
+            };
+            if fraction < 1.0 {
+                return AnimationStep::Interpolate(fraction);
+            }
+        }
+        self.complete(false)
+    }
+
+    pub fn interrupt(&mut self) -> AnimationStep {
+        self.complete(true)
+    }
+
+    fn complete(&mut self, interrupted: bool) -> AnimationStep {
+        let lateness = self.remaining.wrapping_neg() as f32;
+        self.remaining = 0;
+        AnimationStep::Complete {
+            lateness,
+            interrupted,
+        }
+    }
+}
+
 impl State {
     pub fn interpolate(&mut self, source: &Self, target: &Self, fraction: f32) {
         let inverse = 1.0 - fraction;
