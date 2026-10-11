@@ -2793,6 +2793,13 @@ impl ZoneLane for T6Lane {
             };
             let mut scripts = crate::ScriptSources::default();
             scripts.set_entities(entities.clone());
+            super::capture_script_zones(
+                path,
+                image,
+                mode.captured_patches(),
+                &mut scripts,
+                &mut report,
+            );
             let light_grid = asset_world::world_t6::light_grid(&load, world_asset)
                 .map_err(|e| report.push(format!("T6 light grid: {e}")))
                 .ok();
@@ -2960,6 +2967,40 @@ impl ZoneLane for T6Lane {
                         ..Default::default()
                     },
                     team_settings,
+                    path_nodes: load
+                        .path_nodes()
+                        .into_iter()
+                        .map(|node| asset_world::PathNode {
+                            kind: match node.kind {
+                                1 => asset_world::PathNodeKind::Path,
+                                17 => asset_world::PathNodeKind::NegotiationBegin,
+                                18 => asset_world::PathNodeKind::NegotiationEnd,
+                                other => asset_world::PathNodeKind::Other(other as u16),
+                            },
+                            origin: node.origin,
+                            yaw: node.angle,
+                            fields: Some(asset_world::PathNodeFields {
+                                type_name: node.type_name().to_owned(),
+                                spawnflags: node.spawnflags,
+                                script_linkname: node.script_linkname,
+                                script_noteworthy: node.script_noteworthy,
+                                radius: node.radius,
+                                min_use_dist_sq: node.min_use_dist_sq,
+                            }),
+                            targetname: node.targetname,
+                            target: node.target,
+                            animscript: node.animscript,
+                            links: node
+                                .links
+                                .iter()
+                                .map(|link| asset_world::PathLink {
+                                    node: link.node,
+                                    distance: link.distance,
+                                    negotiation: link.negotiation,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
                     ..Default::default()
                 },
                 report,
@@ -3022,23 +3063,13 @@ impl ZoneLane for T6Lane {
         }
         let mut catalog = asset_game::WeaponCatalog::default();
         catalog.set_capture_ns(asset_core::AssetNamespace::T6);
-        let mut seen = 0;
-        for asset in &load.assets {
-            if asset.ty != fastfile_t6::AssetType::Weapon {
-                continue;
-            }
-            seen += 1;
-            if let Some(view) = fastfile_t6::weapon::WeaponView::new(&load, asset) {
-                catalog.capture_t6(view);
-            }
-        }
-        let captured = catalog.len();
         let content_stage = progress.begin_scoped(StageId::CommonAssets, "t6_content", None);
         let sources_stage = progress.begin_scoped(StageId::CommonAssets, "t6_sources", None);
         let mode = asset_transport::t6_content::T6ContentMode::for_path(path);
         let patch = patch_zone(path, &mut report);
         let ipaks = open_ipaks(path, &mut report);
         let mut others: Vec<_> = patch.into_iter().collect();
+        let mut before_map = others.len();
         match mode {
             asset_transport::t6_content::T6ContentMode::Multiplayer => {
                 others.extend(hands_zone(path, &mut report))
@@ -3049,6 +3080,7 @@ impl ZoneLane for T6Lane {
                         &path.with_file_name("common_zm.ff"),
                         &mut report,
                     ));
+                    before_map = others.len();
                     for name in mode.supplements(path).into_iter().skip(1) {
                         let source = path.with_file_name(format!("{name}.ff"));
                         if source.is_file() {
@@ -3058,6 +3090,22 @@ impl ZoneLane for T6Lane {
                 }
             }
         }
+        // Zombies weapons in the engine's zone order; a later zone's weapon
+        // replaces one of the same name.
+        let (early, late) = match mode {
+            asset_transport::t6_content::T6ContentMode::Zombies => others.split_at(before_map),
+            asset_transport::t6_content::T6ContentMode::Multiplayer => (&others[..0], &others[..0]),
+        };
+        let mut seen = 0;
+        for zone in early.iter().chain(std::iter::once(&load)).chain(late) {
+            for weapon in zone.weapons() {
+                seen += 1;
+                if let Some(view) = weapon {
+                    catalog.capture_t6(view);
+                }
+            }
+        }
+        let captured = catalog.len();
         sources_stage.done();
         let models_stage = progress.begin_scoped(StageId::CommonAssets, "t6_models", None);
         let mut content = capture_content(path, &load, &others, &ipaks);

@@ -2,9 +2,11 @@
 //! table ends exactly where the next one (by offset) begins.
 
 mod decode;
+mod program;
 mod translate;
 
 pub use decode::{DecodeError, Instruction, Opcode, Operand, decode_function, operand};
+pub use program::{Built, BuiltinSpec, Builtins, Source, build, load};
 pub use translate::{Linker, Site, Translator, dvar_hash};
 
 pub const MAGIC: &[u8; 7] = b"\x80GSC\r\n\0";

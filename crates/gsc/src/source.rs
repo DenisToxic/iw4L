@@ -18,6 +18,10 @@ pub trait SourceResolver {
     fn origin(&self, _module: &str) -> SourceOrigin {
         SourceOrigin::External
     }
+    /// A compiled module the game runs as it is, kept beside sources of the same name.
+    fn read_module(&self, module: &str) -> Result<Vec<u8>, String> {
+        Err(format!("missing compiled module {module}"))
+    }
 }
 
 impl SourceResolver for BTreeMap<String, String> {

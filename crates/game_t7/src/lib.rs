@@ -56,6 +56,8 @@ impl game_api::GameScripts for T7 {
             built: Some(built.program),
             settings,
             key_types: entity_key_types(request.entities),
+            entity_fields: Vec::new(),
+            dvars: Vec::new(),
         })
     }
 
@@ -182,6 +184,7 @@ const ZOMBIES_MODE: ModeRules = ModeRules {
     waits_for_lobby: true,
     binds_account: false,
     binds_objectives: false,
+    host_rules: false,
     hud: HudRules {
         code_hud: Rule::Unknown(unknown!(
             "t7.hud.code_hud",

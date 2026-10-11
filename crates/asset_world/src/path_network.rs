@@ -11,6 +11,20 @@ pub struct PathNode {
     /// The traversal animscript a negotiation begin node names.
     pub animscript: String,
     pub links: Vec<PathLink>,
+    /// The node's script fields, when the game's decoder reads them all.
+    pub fields: Option<PathNodeFields>,
+}
+
+/// A node's script fields beyond its kind, place and names above.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathNodeFields {
+    /// The game's name for the node's type.
+    pub type_name: String,
+    pub spawnflags: u32,
+    pub script_linkname: String,
+    pub script_noteworthy: String,
+    pub radius: f32,
+    pub min_use_dist_sq: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +97,7 @@ pub fn path_network_t5(s: &ZoneStream<'_>, strings: &ScriptStrings) -> Vec<PathN
                 target: text(node, sz::PATH_NODE_TARGET_OFF),
                 animscript: text(node, sz::PATH_NODE_ANIMSCRIPT_OFF),
                 links,
+                fields: None,
             }
         })
         .collect()

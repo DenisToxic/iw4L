@@ -21,6 +21,8 @@ impl game_api::GameScripts for Iw4 {
             built: None,
             settings: Vec::new(),
             key_types: Vec::new(),
+            entity_fields: Vec::new(),
+            dvars: Vec::new(),
         })
     }
 
@@ -52,6 +54,7 @@ const MODE: ModeRules = ModeRules {
     waits_for_lobby: false,
     binds_account: true,
     binds_objectives: true,
+    host_rules: false,
     hud: HudRules {
         code_hud: Rule::Known(()),
         game_hud_menus: false,

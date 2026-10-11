@@ -21,6 +21,18 @@ pub struct NavNode {
     pub animscript: String,
     /// Linked node, link length, and whether crossing it is a traversal.
     pub links: Vec<(u16, f32, bool)>,
+    /// Every script field, when the game's decoder reads them all.
+    pub fields: Option<NavNodeFields>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NavNodeFields {
+    pub type_name: String,
+    pub spawnflags: u32,
+    pub script_linkname: String,
+    pub script_noteworthy: String,
+    pub radius: f32,
+    pub min_use_dist_sq: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -688,6 +700,20 @@ fn find_nodes(world: &mut World, args: &[Value]) -> Result<Vec<Value>, String> {
         .collect()
 }
 
+/// The script objects of the nodes `keep` admits, in map order.
+pub(crate) fn nodes_where(
+    world: &mut World,
+    keep: impl Fn(&NavNode) -> bool,
+) -> Result<Vec<Value>, String> {
+    let Some(paths) = FrameWorld::from_world(world).actor_paths() else {
+        return Ok(Vec::new());
+    };
+    (0..paths.nodes.len())
+        .filter(|&index| keep(&paths.nodes[index]))
+        .map(|index| node_object(world, &paths, index as u16))
+        .collect()
+}
+
 /// The script object standing for a path node, made on first use.
 fn node_object(world: &mut World, paths: &ActorPaths, index: u16) -> Result<Value, String> {
     let mut runtime = world.resource_mut::<RoundScript>();
@@ -700,7 +726,29 @@ fn node_object(world: &mut World, paths: &ActorPaths, index: u16) -> Result<Valu
     let id = runtime.new_object()?;
     runtime.set_object_field(id, "origin", Value::Vector(node.origin));
     runtime.set_object_field(id, "angles", Value::Vector([0.0, node.yaw, 0.0]));
-    runtime.set_object_field(id, "type", Value::string(node.kind.script_type()));
+    let type_name = node
+        .fields
+        .as_ref()
+        .map_or(node.kind.script_type(), |fields| fields.type_name.as_str());
+    runtime.set_object_field(id, "type", Value::string(type_name));
+    if let Some(fields) = &node.fields {
+        runtime.set_object_field(id, "spawnflags", Value::Int(fields.spawnflags as i32));
+        runtime.set_object_field(id, "radius", Value::Float(fields.radius));
+        runtime.set_object_field(id, "minusedistsq", Value::Float(fields.min_use_dist_sq));
+        runtime.set_object_field(
+            id,
+            "suspended",
+            Value::Int(i32::from(fields.spawnflags & 0x10000 != 0)),
+        );
+        for (name, text) in [
+            ("script_linkname", &fields.script_linkname),
+            ("script_noteworthy", &fields.script_noteworthy),
+        ] {
+            if !text.is_empty() {
+                runtime.set_object_field(id, name, Value::string(text));
+            }
+        }
+    }
     for (name, text) in [
         ("targetname", &node.targetname),
         ("target", &node.target),

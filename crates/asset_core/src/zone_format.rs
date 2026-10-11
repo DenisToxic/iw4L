@@ -154,7 +154,101 @@ pub struct ZoneScripts {
     pub modules: Vec<(String, Vec<u8>)>,
     /// Config raw files (`….cfg`) and their text.
     pub configs: Vec<(String, String)>,
+    pub tables: Vec<ZoneTable>,
+    /// Layouts of bit-packed buffers (a player's stats), by name.
+    pub layouts: Vec<BitLayout>,
+    /// Zombies barrier types.
+    pub barriers: Vec<BarrierType>,
     pub report: Vec<String>,
+}
+
+/// A zombies barrier type: pieces that open and close by animation, and the
+/// zombie animation states it offers. Flags are the game's words.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarrierType {
+    pub name: String,
+    pub piece_count: i32,
+    pub auto_hide_open_pieces: u32,
+    pub taunts: u32,
+    pub reach_through_attacks: u32,
+    pub taunt_anim_state: String,
+    pub reach_through_anim_state: String,
+    pub attack_slots: i32,
+    pub attack_slot_horz_offset: f32,
+    pub pieces: Vec<BarrierPiece>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarrierPiece {
+    /// The default, alternate and upgraded models.
+    pub models: [Option<String>; 3],
+    /// The animations a piece plays opening and closing.
+    pub open_anim: Option<BarrierAnim>,
+    pub close_anim: Option<BarrierAnim>,
+    pub anim_state: String,
+    pub anim_substate: String,
+    pub upgraded_lives: u32,
+}
+
+/// An animation by name, with its frame count and rate when known.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarrierAnim {
+    pub name: String,
+    pub timing: Option<(u16, f32)>,
+}
+
+/// A string table a zone carries: its name and cells, row by row.
+#[derive(Clone, Debug, Default)]
+pub struct ZoneTable {
+    pub name: String,
+    pub columns: usize,
+    pub rows: usize,
+    pub cells: Vec<String>,
+}
+
+/// The layout of a bit-packed buffer: structs of members at bit offsets; the
+/// first struct is the root.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BitLayout {
+    pub name: String,
+    /// The buffer's size in bits.
+    pub bits: u32,
+    pub structs: Vec<BitStruct>,
+    /// Each enum's names, in order.
+    pub enums: Vec<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BitStruct {
+    pub name: String,
+    pub members: Vec<BitMember>,
+}
+
+/// A member: its size in bits (all of an array), its offset in bits, the
+/// game's type number, the struct it holds, the fraction bits of a fixed
+/// point number, its array length and the enum that names its indices.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BitMember {
+    pub name: String,
+    pub bits: u32,
+    pub offset: u32,
+    pub kind: u32,
+    pub external: i32,
+    pub range: u32,
+    pub array_size: i32,
+    pub enum_index: i32,
+}
+
+/// Where a game whose zones `asset_transport` opens itself keeps the compiled
+/// scripts its maps run as they are.
+#[derive(Clone, Copy)]
+pub struct ScriptZoneFormat {
+    pub game: FamilyId,
+    /// The zones whose scripts a map runs, the map's own among them, in load
+    /// order: a later zone's module replaces an earlier one's.
+    pub script_zones: fn(&str) -> Vec<String>,
+    /// The compiled modules, configs and tables a decoded zone carries.
+    pub scripts: fn(&[u8]) -> ZoneScripts,
 }
 
 impl ZoneFormat {

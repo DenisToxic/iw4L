@@ -81,38 +81,11 @@ pub fn capture_t6_string_table(
     load: &fastfile_t6::ZoneLoad,
     asset: &fastfile_t6::LoadedAsset,
 ) -> Option<crate::CapturedStringTable> {
-    if asset.ty != fastfile_t6::AssetType::StringTable {
-        return None;
-    }
-    let h = &asset.header;
-    let word = |at: usize| Some(u32::from_le_bytes(h.get(at..at + 4)?.try_into().ok()?));
-    let ptr = |raw: u32| {
-        (raw != 0 && raw < 0xFFFF_FFFE).then(|| fastfile_t6::Ptr {
-            block: ((raw - 1) >> 29) as u8,
-            offset: (raw - 1) & 0x1FFF_FFFF,
-        })
-    };
-    let text = |p: Option<fastfile_t6::Ptr>| {
-        p.and_then(|p| load.blocks.cstr(p).ok())
-            .map(|b| String::from_utf8_lossy(b).into_owned())
-    };
-    let name = text(ptr(word(0)?))?;
-    let columns = usize::try_from(word(4)? as i32).ok()?;
-    let rows = usize::try_from(word(8)? as i32).ok()?;
-    let values = ptr(word(12)?);
-    let mut cells = Vec::with_capacity(rows * columns);
-    for i in 0..rows * columns {
-        let cell = values.map(|v| v.at(8 * i as u32));
-        let string = cell
-            .and_then(|c| load.blocks.ptr_at(c).ok().flatten())
-            .and_then(|p| load.blocks.cstr(p).ok())
-            .map_or_else(String::new, |b| String::from_utf8_lossy(b).into_owned());
-        cells.push(string);
-    }
+    let table = fastfile_t6::string_table(load, asset)?;
     Some(crate::CapturedStringTable {
-        name,
-        columns,
-        rows,
-        cells,
+        name: table.name.to_owned(),
+        columns: table.columns,
+        rows: table.rows,
+        cells: table.cells.into_iter().map(str::to_owned).collect(),
     })
 }

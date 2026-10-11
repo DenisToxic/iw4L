@@ -58,6 +58,9 @@ pub(crate) fn install(
         entities: Arc::new(level.entities),
         tables: Arc::new(level.tables),
         keys: Arc::new(level.keys),
+        entity_fields: Arc::new(level.entity_fields),
+        layouts: level.layouts,
+        barriers: level.barriers,
         entries: Vec::new(),
         schemas: level.schemas,
         player_data_defaults: level.player_data_defaults.map(Arc::new),
@@ -137,10 +140,11 @@ pub(crate) fn install_level(
     }
     let entities = plan.entities.clone();
     let keys = plan.keys.clone();
+    let entity_fields = plan.entity_fields.clone();
     world.resource_mut::<RoundScript>().restart = Some(Arc::new(plan));
     let handed = world
         .resource_mut::<RoundScript>()
-        .spawn_map_entities(&entities, &keys)
+        .spawn_map_entities(&entities, &keys, entity_fields.as_ref().as_ref())
         .map_err(|m| Fault::at(&location, m))?;
     if let Some(&function) = program.names.get(CREATE_STRUCT) {
         for id in handed {

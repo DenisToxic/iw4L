@@ -77,3 +77,75 @@ fn script<'z>(load: &'z ZoneLoad, header: &[u8], index: usize) -> Result<Entry<'
         })?;
     Ok(Entry::Module(ScriptAsset { name, bytes }))
 }
+
+/// A raw file (`RawFile`): its name and bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawFile<'z> {
+    pub name: &'z str,
+    pub bytes: &'z [u8],
+}
+
+pub fn raw_file<'z>(load: &'z ZoneLoad, asset: &crate::LoadedAsset) -> Option<RawFile<'z>> {
+    if asset.ty != AssetType::RawFile {
+        return None;
+    }
+    let word = |at: usize| {
+        asset
+            .header
+            .get(at..at + 4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+    };
+    let name = decode_ptr(word(NAME)?)
+        .and_then(|at| load.blocks.cstr(at).ok())
+        .and_then(|bytes| core::str::from_utf8(bytes).ok())?;
+    let bytes =
+        decode_ptr(word(BUFFER)?).and_then(|at| load.blocks.bytes(at, word(LEN)? as usize).ok())?;
+    Some(RawFile { name, bytes })
+}
+
+/// A string table (`StringTable`): its name and cells, row by row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StringTable<'z> {
+    pub name: &'z str,
+    pub columns: usize,
+    pub rows: usize,
+    pub cells: Vec<&'z str>,
+}
+
+const TABLE_COLUMNS: usize = 4;
+const TABLE_ROWS: usize = 8;
+const TABLE_VALUES: usize = 12;
+/// Each cell: a string pointer and its hash.
+const CELL_LEN: u32 = 8;
+
+pub fn string_table<'z>(load: &'z ZoneLoad, asset: &crate::LoadedAsset) -> Option<StringTable<'z>> {
+    if asset.ty != AssetType::StringTable {
+        return None;
+    }
+    let word = |at: usize| {
+        asset
+            .header
+            .get(at..at + 4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+    };
+    let text = |p: Option<crate::Ptr>| {
+        p.and_then(|p| load.blocks.cstr(p).ok())
+            .and_then(|bytes| core::str::from_utf8(bytes).ok())
+    };
+    let name = text(decode_ptr(word(NAME)?))?;
+    let columns = usize::try_from(word(TABLE_COLUMNS)? as i32).ok()?;
+    let rows = usize::try_from(word(TABLE_ROWS)? as i32).ok()?;
+    let values = decode_ptr(word(TABLE_VALUES)?);
+    let cells = (0..rows * columns)
+        .map(|i| {
+            let cell = values.map(|v| v.at(CELL_LEN * i as u32));
+            text(cell.and_then(|c| load.blocks.ptr_at(c).ok().flatten())).unwrap_or("")
+        })
+        .collect();
+    Some(StringTable {
+        name,
+        columns,
+        rows,
+        cells,
+    })
+}

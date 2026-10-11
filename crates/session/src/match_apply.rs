@@ -518,6 +518,17 @@ pub fn apply_prepared_match(
                         .iter()
                         .map(|link| (link.node, link.distance, link.negotiation))
                         .collect(),
+                    fields: node
+                        .fields
+                        .as_ref()
+                        .map(|fields| sim::script::NavNodeFields {
+                            type_name: fields.type_name.clone(),
+                            spawnflags: fields.spawnflags,
+                            script_linkname: fields.script_linkname.clone(),
+                            script_noteworthy: fields.script_noteworthy.clone(),
+                            radius: fields.radius,
+                            min_use_dist_sq: fields.min_use_dist_sq,
+                        }),
                 })
                 .collect(),
         ));
@@ -632,7 +643,7 @@ pub fn apply_prepared_match(
         if *role == frame::RuntimeRole::Listen {
             sim.register_local_presentation_dvars(local.as_ref().map(|local| local.0));
         }
-        let mut natives = crate::games::natives(anim_namespace);
+        let mut natives = crate::games::natives(anim_namespace, &mode);
         if mode.report_builtin_gaps {
             let gaps = natives.bind_gaps(&scripts);
             if !gaps.is_empty() {
@@ -1180,6 +1191,12 @@ fn preflight_match_install(
         fn read_bytes(&self, module: &str) -> Result<Vec<u8>, String> {
             self.0.read(module)
         }
+        fn read_module(&self, module: &str) -> Result<Vec<u8>, String> {
+            self.0
+                .module(module)
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| format!("missing compiled module {module}"))
+        }
         fn origin(&self, module: &str) -> sim::script::SourceOrigin {
             match self.0.origin(module) {
                 Some(assets::ScriptSourceOrigin::Packaged) => sim::script::SourceOrigin::Packaged,
@@ -1243,6 +1260,9 @@ fn preflight_match_install(
         schemas: sources.0.schemas().clone(),
         entities: sim::script::parse_entity_string(sources.0.entities().unwrap_or("")),
         keys,
+        entity_fields: None,
+        layouts: sources.0.layouts().clone(),
+        barriers: sources.0.barriers().clone(),
         tables: sources
             .0
             .tables()
@@ -1284,11 +1304,19 @@ fn preflight_match_install(
     }
     let game_scripts = crate::games::scripts(family);
     let config = |name: &str| sources.0.config(name);
+    let table = |name: &str| {
+        sources
+            .0
+            .tables()
+            .get(&name.to_ascii_lowercase())
+            .map(|table| (table.columns, table.cells.as_slice()))
+    };
     let request = game_api::ScriptRequest {
         map: zone,
         gametype,
         entities: sources.0.entities().unwrap_or(""),
         config: &config,
+        table: &table,
     };
     let program = match game_scripts.program(&request, &sources) {
         game_api::Rule::Known(program) => program,
@@ -1342,6 +1370,15 @@ fn preflight_match_install(
             .iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
     );
+    for (name, value) in &program.dvars {
+        match script_dvars
+            .iter_mut()
+            .find(|(set, _)| set.eq_ignore_ascii_case(name))
+        {
+            Some((_, set)) => set.clone_from(value),
+            None => script_dvars.push((name.clone(), value.clone())),
+        }
+    }
     for (name, value) in rules.map_or(&[][..], |rules| &rules.0) {
         match script_dvars
             .iter_mut()
@@ -1361,20 +1398,27 @@ fn preflight_match_install(
     script_dvars.extend(script_dvar_overrides());
     let script_entries = program.entries;
     let gametype_settings = program.settings;
+    let key_type = |ty| match ty {
+        game_api::KeyType::Int => sim::script::KeyType::Int,
+        game_api::KeyType::Float => sim::script::KeyType::Float,
+        game_api::KeyType::String => sim::script::KeyType::String,
+        game_api::KeyType::Vector => sim::script::KeyType::Vector,
+    };
     if !program.key_types.is_empty() {
         script_level.keys = program
             .key_types
             .into_iter()
-            .map(|(key, ty)| {
-                let ty = match ty {
-                    game_api::KeyType::Int => sim::script::KeyType::Int,
-                    game_api::KeyType::Float => sim::script::KeyType::Float,
-                    game_api::KeyType::String => sim::script::KeyType::String,
-                    game_api::KeyType::Vector => sim::script::KeyType::Vector,
-                };
-                (key, ty)
-            })
+            .map(|(key, ty)| (key, key_type(ty)))
             .collect();
+    }
+    if !program.entity_fields.is_empty() {
+        script_level.entity_fields = Some(
+            program
+                .entity_fields
+                .into_iter()
+                .map(|(key, ty)| (key, key_type(ty)))
+                .collect(),
+        );
     }
     let actor_anim_sources: Vec<(String, String)> = if is_zombies {
         sources

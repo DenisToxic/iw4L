@@ -3,8 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, Default)]
 pub struct ScriptSources {
     sources: BTreeMap<String, ScriptSource>,
+    /// Compiled modules a game runs as they are, beside any source of the same name.
+    modules: BTreeMap<String, Vec<u8>>,
     tables: BTreeMap<String, ScriptTable>,
     schemas: BTreeMap<String, std::sync::Arc<structured_data_iw4::DefinitionSet>>,
+    layouts: BTreeMap<String, std::sync::Arc<asset_core::BitLayout>>,
+    barriers: BTreeMap<String, std::sync::Arc<asset_core::BarrierType>>,
     entities: Option<String>,
     configs: BTreeMap<String, String>,
 }
@@ -42,6 +46,60 @@ impl ScriptSources {
 
     pub fn origin(&self, module: &str) -> Option<ScriptSourceOrigin> {
         self.sources.get(module).map(|source| source.origin)
+    }
+
+    pub fn module(&self, name: &str) -> Option<&[u8]> {
+        self.modules.get(name).map(Vec::as_slice)
+    }
+
+    /// A compiled server module (`maps/mp/x.gsc` is read as `maps/mp/x`).
+    pub(crate) fn capture_module(&mut self, name: &str, bytes: Vec<u8>) {
+        if let Some(module) = normalize(name).strip_suffix(".gsc") {
+            self.modules.insert(module.to_owned(), bytes);
+        }
+    }
+
+    /// The compiled modules and tables of `other`, which a game reads as they
+    /// are; nothing when it has no compiled modules.
+    pub(crate) fn keep_compiled(&mut self, other: &Self) {
+        if other.modules.is_empty() {
+            return;
+        }
+        self.modules.extend(other.modules.clone());
+        self.tables.extend(other.tables.clone());
+        self.configs.extend(other.configs.clone());
+        self.layouts.extend(other.layouts.clone());
+        self.barriers.extend(other.barriers.clone());
+    }
+
+    pub(crate) fn capture_layout(&mut self, layout: asset_core::BitLayout) {
+        self.layouts
+            .insert(normalize(&layout.name), std::sync::Arc::new(layout));
+    }
+
+    pub fn layouts(&self) -> &BTreeMap<String, std::sync::Arc<asset_core::BitLayout>> {
+        &self.layouts
+    }
+
+    /// A later zone's barrier type replaces an earlier one of the same name.
+    pub(crate) fn capture_barrier(&mut self, barrier: asset_core::BarrierType) {
+        self.barriers
+            .insert(normalize(&barrier.name), std::sync::Arc::new(barrier));
+    }
+
+    pub fn barriers(&self) -> &BTreeMap<String, std::sync::Arc<asset_core::BarrierType>> {
+        &self.barriers
+    }
+
+    pub(crate) fn capture_zone_table(&mut self, table: asset_core::ZoneTable) {
+        self.tables.insert(
+            normalize(&table.name),
+            ScriptTable {
+                columns: table.columns,
+                rows: table.rows,
+                cells: table.cells,
+            },
+        );
     }
 
     pub fn len(&self) -> usize {
@@ -211,8 +269,11 @@ impl ScriptSources {
 
     pub(crate) fn overlay(&mut self, other: Self) {
         self.sources.extend(other.sources);
+        self.modules.extend(other.modules);
         self.tables.extend(other.tables);
         self.schemas.extend(other.schemas);
+        self.layouts.extend(other.layouts);
+        self.barriers.extend(other.barriers);
         self.configs.extend(other.configs);
         if other.entities.is_some() {
             self.entities = other.entities;

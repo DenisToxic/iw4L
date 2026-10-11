@@ -132,6 +132,9 @@ const SP_CALLBACKS: &str = "maps/_callbacksetup::";
 /// looks them up by hash). Only those that take no arguments are found here:
 /// the others' arguments are not Black Ops 3's yet.
 const SHARED_CALLBACKS: &str = "scripts/shared/callbacks_shared::";
+/// Black Ops 2's zombies keep theirs with the zombies gametypes; again only
+/// those without arguments.
+const ZOMBIES_CALLBACKS: &str = "maps/mp/gametypes_zm/_callbacksetup::";
 const SHARED_WITHOUT_ARGUMENTS: [&str; 2] = [
     "codecallback_playerconnect",
     "codecallback_playerdisconnect",
@@ -166,6 +169,12 @@ fn entry(world: &World, name: &str) -> Result<(Arc<Program>, usize, Location), F
             SHARED_WITHOUT_ARGUMENTS
                 .contains(&callback)
                 .then(|| program.names.get(&format!("{SHARED_CALLBACKS}{callback}")))?
+        })
+        .or_else(|| {
+            let callback = key.strip_prefix(MP_CALLBACKS)?;
+            SHARED_WITHOUT_ARGUMENTS
+                .contains(&callback)
+                .then(|| program.names.get(&format!("{ZOMBIES_CALLBACKS}{callback}")))?
         })
         .ok_or_else(|| Fault::at(&location, "unknown script entry point"))?;
     Ok((program, function, location))
@@ -656,12 +665,7 @@ fn instruction(
                 .len()
                 .checked_sub(argc)
                 .ok_or("invalid IR: argument underflow")?;
-            let args = thread
-                .stack
-                .split_off(base)
-                .into_iter()
-                .map(|value| copy_value(world, value))
-                .collect::<Result<Vec<_>, _>>()?;
+            let raw = thread.stack.split_off(base);
             let callee = match op {
                 Op::Call(callee, _, _) | Op::Spawn(callee, _, _) => callee,
                 Op::Indirect(..) => match pop(thread)? {
@@ -676,6 +680,24 @@ fn instruction(
                 },
                 _ => unreachable!(),
             };
+            // A builtin that edits an array in place gets the caller's array.
+            let in_place = match callee {
+                Callee::Native(index) => {
+                    IN_PLACE_BUILTINS.contains(&&*program.natives[index as usize].name)
+                }
+                Callee::Script(_) | Callee::Unlinked(_) => false,
+            };
+            let args = raw
+                .into_iter()
+                .enumerate()
+                .map(|(index, value)| {
+                    if in_place && index == 0 {
+                        Ok(value)
+                    } else {
+                        copy_value(world, value)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             let receiver = if method {
                 pop(thread)?
             } else {
@@ -1505,6 +1527,10 @@ fn allocate_array(world: &mut World) -> Result<Value, String> {
     runtime.arrays.insert(id, BTreeMap::new());
     Ok(Value::Array(id))
 }
+
+/// Builtins that edit their first argument, an array, where it is: the
+/// engine shares an array until a script writes to it.
+const IN_PLACE_BUILTINS: [&str; 3] = ["arrayinsert", "arrayremoveindex", "arrayremovevalue"];
 
 fn copy_value(world: &mut World, value: Value) -> Result<Value, String> {
     fn copy(

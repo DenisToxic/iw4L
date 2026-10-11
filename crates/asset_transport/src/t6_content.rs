@@ -58,9 +58,35 @@ impl T6ContentMode {
             let map = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
             if map.starts_with("zm_") {
                 zones.push(format!("so_zclassic_{map}"));
-                zones.push(format!("patch_{map}"));
+                zones.push(format!("{map}_patch"));
             }
         }
+        zones
+    }
+
+    /// Patch zones the game downloads at launch and keeps only in memory, as
+    /// the owner captured them into `<artifacts>/captured/`.
+    pub fn captured_patches(self) -> Vec<std::path::PathBuf> {
+        let suffix = match self {
+            Self::Multiplayer => "_mp",
+            Self::Zombies => "_zm",
+        };
+        let Ok(dir) = crate::discover::ensure_artifacts_dir() else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(dir.join("captured")) else {
+            return Vec::new();
+        };
+        let mut zones: Vec<_> = entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| stem.starts_with("ffotd_") && stem.contains(suffix))
+                    && path.extension().is_some_and(|ext| ext == "ff")
+            })
+            .collect();
+        zones.sort();
         zones
     }
 }
