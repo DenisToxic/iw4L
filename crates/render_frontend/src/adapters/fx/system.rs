@@ -3120,6 +3120,14 @@ fn play_fx(
     };
     let axis = if payload.direction == [0.0; 3] {
         [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    } else if payload.origin2 != [0.0; 3] {
+        // Forward and up given whole: left is up × forward.
+        let ([fx, fy, fz], [ux, uy, uz]) = (payload.direction, payload.origin2);
+        [
+            payload.direction,
+            [uy * fz - uz * fy, uz * fx - ux * fz, ux * fy - uy * fx],
+            payload.origin2,
+        ]
     } else {
         axis_from_hit_normal(payload.direction)
     };
