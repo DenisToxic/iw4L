@@ -1,4 +1,5 @@
 mod builtins;
+mod keys;
 mod script_zones;
 mod startup;
 
@@ -52,6 +53,7 @@ impl game_api::GameScripts for T6 {
             built: None,
             settings: Vec::new(),
             key_types: Vec::new(),
+            entity_fields: Vec::new(),
             dvars: Vec::new(),
         })
     }
@@ -132,7 +134,11 @@ fn own_zombies(
         entries,
         built: Some(built.program),
         settings: gametype_settings(request.config, &start.gametype),
-        key_types: Vec::new(),
+        key_types: (request.config)("radiant/keys.txt").map_or_else(Vec::new, keys::parse),
+        entity_fields: keys::ENTITY_FIELDS
+            .iter()
+            .map(|&(name, ty)| (name.to_owned(), ty))
+            .collect(),
         dvars,
     })
 }

@@ -61,6 +61,10 @@ pub struct ScriptProgram {
     /// The type a map entity key's value takes, by key; a key not listed
     /// stays as the runtime reads it otherwise.
     pub key_types: Vec<(String, KeyType)>,
+    /// The keys the engine reads into an entity itself. When given, a map
+    /// entity keeps only these and the keys of `key_types`, and a struct only
+    /// the keys of `key_types`.
+    pub entity_fields: Vec<(String, KeyType)>,
     /// Dvars the game sets for this match over the config and engine defaults.
     pub dvars: Vec<(String, String)>,
 }

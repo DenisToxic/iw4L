@@ -6,6 +6,7 @@ extern crate alloc;
 mod asset_type;
 mod cipher;
 mod content;
+pub mod ddl;
 mod envelope;
 pub mod light_grid;
 mod path;

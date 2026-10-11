@@ -51,7 +51,7 @@ fn scripts(content: &[u8]) -> asset_core::ZoneScripts {
     }
     for asset in &load.assets {
         if let Some(file) = fastfile_t6::raw_file(&load, asset)
-            && file.name.ends_with(".cfg")
+            && (file.name.ends_with(".cfg") || file.name == "radiant/keys.txt")
             && let Ok(text) = std::str::from_utf8(file.bytes)
         {
             out.configs.push((file.name.to_owned(), text.to_owned()));
@@ -62,6 +62,37 @@ fn scripts(content: &[u8]) -> asset_core::ZoneScripts {
                 columns: table.columns,
                 rows: table.rows,
                 cells: table.cells.into_iter().map(str::to_owned).collect(),
+            });
+        }
+        // The data definition's newest version.
+        if let Some(ddl) = fastfile_t6::ddl::ddl(&load, asset)
+            && let Some(def) = ddl.versions.into_iter().next()
+        {
+            out.layouts.push(asset_core::BitLayout {
+                name: ddl.name,
+                bits: def.structs.first().map_or(0, |root| root.size),
+                structs: def
+                    .structs
+                    .into_iter()
+                    .map(|s| asset_core::BitStruct {
+                        name: s.name,
+                        members: s
+                            .members
+                            .into_iter()
+                            .map(|m| asset_core::BitMember {
+                                name: m.name,
+                                bits: m.bits,
+                                offset: m.offset,
+                                kind: m.kind,
+                                external: m.external,
+                                range: m.range,
+                                array_size: m.array_size,
+                                enum_index: m.enum_index,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                enums: def.enums.into_iter().map(|e| e.members).collect(),
             });
         }
     }

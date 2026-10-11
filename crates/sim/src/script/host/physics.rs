@@ -18,7 +18,7 @@ fn object_of(world: &World, receiver: &Value) -> Result<u64, String> {
     super::natives::engine::entity_id(world, receiver)
 }
 
-fn usable<'a>(
+pub(crate) fn usable<'a>(
     world: &'a mut World,
     receiver: &Value,
 ) -> Result<&'a mut super::entities::Usable, String> {

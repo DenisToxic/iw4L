@@ -465,5 +465,8 @@ pub(crate) fn capture_script_zones(
         for table in found.tables {
             scripts.capture_zone_table(table);
         }
+        for layout in found.layouts {
+            scripts.capture_layout(layout);
+        }
     }
 }
