@@ -11,6 +11,15 @@ use crate::match_state::ClassDef;
 
 pub const SPAWN_IDEAL_DIST: f32 = 1600.0;
 
+/// A client's team by its script name; none off the two teams.
+pub(crate) fn team_name(team: i32) -> Option<&'static str> {
+    match team {
+        TEAM_AXIS => Some("axis"),
+        TEAM_ALLIES => Some("allies"),
+        _ => None,
+    }
+}
+
 pub const SPAWN_BAD_DIST: f32 = 1200.0;
 
 #[derive(Clone, Debug, PartialEq)]

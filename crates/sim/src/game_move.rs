@@ -6,7 +6,7 @@ use crate::frame::FrameWorld;
 use crate::world::ClientId;
 use game_api::movement::{
     GameWeapon, HELD_WEAPONS, HeldWeapon, MoveCommand, MoveContext, MoveOutcome, MovePlayer,
-    MoveRestriction, MoveTrace, MoveWorld, PlayerMovement, Stance, WaterSurface,
+    MoveRestriction, MoveSignal, MoveTrace, MoveWorld, PlayerMovement, Stance, WaterSurface,
 };
 
 /// Sweeps `mins`..`maxs` from `start` to `end` against what `mask` names,
@@ -61,13 +61,15 @@ impl MoveWorld for MatchMoveWorld<'_> {
     }
 }
 
-/// Runs one command with the game's movement and writes the player back.
+/// Runs one command with the game's movement and writes the player back;
+/// on the server, the shots its events fire follow.
 pub(crate) fn run(
     world: &mut FrameWorld,
     movement: &'static dyn PlayerMovement,
     id: ClientId,
     cmd: MoveCommand,
     trace: &MoveTraceFn<'_>,
+    tick: crate::world::Tick,
 ) -> MoveOutcome {
     let Some(ps) = world.player(id).copied() else {
         return MoveOutcome::default();
@@ -84,7 +86,8 @@ pub(crate) fn run(
     let context = MoveContext {
         predicting: !world.publishes_snapshot(),
     };
-    let outcome = {
+    let before = player.clone();
+    let mut outcome = {
         let around = MatchMoveWorld {
             world: &*world,
             content: world.content(),
@@ -98,6 +101,16 @@ pub(crate) fn run(
         ps.store_move_player(&player);
     }
     apply_held(world, id, &held, &player.held);
+    if world.publishes_snapshot()
+        && outcome
+            .signals
+            .iter()
+            .any(|signal| matches!(signal, MoveSignal::Event { .. }))
+    {
+        let mut around = crate::game_fire::MatchFireWorld::new(world, tick, id);
+        let gaps = movement.server_events(&before, &player, &outcome.signals, &mut around);
+        outcome.gaps.extend(gaps);
+    }
     outcome
 }
 

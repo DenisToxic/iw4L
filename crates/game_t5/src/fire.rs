@@ -1,0 +1,1050 @@
+//! Black Ops' server side of a shot: what its client event handler does with
+//! a player's fire events. A bullet weapon's shot takes the weapon's spread,
+//! fires its pellets along a seeded spread, traces each through what it may
+//! penetrate and damages what it hits.
+
+use fastfile_t5::weapon_def::WeaponDefView;
+use game_api::fire::{
+    BulletHitType, BulletImpact, BulletTrace, FireDamage, FireEntity, FireEntityKind, FireWorld,
+};
+use game_api::movement::{ENTITY_NONE, ENTITY_WORLD, MoveSignal};
+use game_api::{Unknown, unknown};
+use movement_t5::PlayerState;
+use movement_t5::events::event as ev;
+
+/// What a bullet stops at: solids, glass, bodies and the like.
+const BULLET_MASK: u32 = 0x0280_e833;
+
+mod surf {
+    pub const SKY: u32 = 0x4;
+    pub const NOIMPACT: u32 = 0x10;
+    pub const NOPENETRATE: u32 = 0x100;
+    /// The surface type a sentient's body counts as when the trace has none.
+    pub const FLESH: u32 = 7 << 20;
+    pub const WATER: i32 = 20;
+}
+
+/// Damage flags.
+mod dflags {
+    pub const RADIUS: i32 = 0x1;
+    pub const NO_ARMOR: i32 = 0x2;
+    /// A bullet's damage after it went through a surface.
+    pub const PENETRATED: i32 = 0x8;
+}
+
+/// The means of death, by number.
+const MEANS: [&str; 21] = [
+    "MOD_UNKNOWN",
+    "MOD_PISTOL_BULLET",
+    "MOD_RIFLE_BULLET",
+    "MOD_GRENADE",
+    "MOD_GRENADE_SPLASH",
+    "MOD_PROJECTILE",
+    "MOD_PROJECTILE_SPLASH",
+    "MOD_MELEE",
+    "MOD_BAYONET",
+    "MOD_HEAD_SHOT",
+    "MOD_CRUSH",
+    "MOD_TELEFRAG",
+    "MOD_FALLING",
+    "MOD_SUICIDE",
+    "MOD_TRIGGER_HURT",
+    "MOD_EXPLOSIVE",
+    "MOD_IMPACT",
+    "MOD_BURNED",
+    "MOD_HIT_BY_OBJECT",
+    "MOD_DROWN",
+    "MOD_GAS",
+];
+const MOD_PISTOL_BULLET: usize = 1;
+const MOD_RIFLE_BULLET: usize = 2;
+const MOD_MELEE: usize = 7;
+
+/// Hit locations, by number.
+const HIT_LOCATIONS: [&str; 19] = [
+    "none",
+    "helmet",
+    "head",
+    "neck",
+    "torso_upper",
+    "torso_lower",
+    "right_arm_upper",
+    "left_arm_upper",
+    "right_arm_lower",
+    "left_arm_lower",
+    "right_hand",
+    "left_hand",
+    "right_leg_upper",
+    "left_leg_upper",
+    "right_leg_lower",
+    "left_leg_lower",
+    "right_foot",
+    "left_foot",
+    "gun",
+];
+
+/// `weaponType`: a weapon that fires bullets.
+const WEAPTYPE_BULLET: i32 = 0;
+/// `weaponClass`: a spread weapon, its pellets out to its own range.
+const WEAPCLASS_SPREAD: i32 = 3;
+/// `fireType`: stacked barrels fired together.
+const FIRETYPE_STACKED: i32 = 5;
+/// `perks`: the perk that tightens hip spread in zombies (Deadshot).
+const PERK_DEADSHOT: u32 = movement_t5::perks::DEADSHOT;
+/// `pm_flags` of a player on a turret or in a vehicle; the server fires
+/// that, not the player.
+const PMF_MOUNTED_FIRE: u32 = 0x4300;
+/// The most surfaces a bullet that does not penetrate passes through.
+const BULLET_EXTENDED_SEGMENTS: i32 = 12;
+/// The eye heights hip spread blends between: prone to crouched, then
+/// crouched to standing.
+const PRONE_EYE: f32 = 11.0;
+const CROUCH_EYE: f32 = 40.0;
+const DEG2RAD: f32 = 0.0174532924;
+
+pub(crate) fn fire_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.fire",
+        "Black Ops' melee hits, thrown and fired grenades, projectiles, detonation and grenade suicide are not run",
+        "Black Ops' server melee, offhand throw, grenade, rocket and detonate rules from its executable"
+    )
+}
+
+fn gun_angles_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.gun_angles",
+        "Black Ops aims a shot along the gun angles its client sends with each command; the runtime's client sends none, so shots go along the view the previous command left",
+        "the client's gun angle computation and the command fields that carry it"
+    )
+}
+
+fn mounted_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.mounted_fire",
+        "a shot from a player on a turret or in a vehicle is not fired",
+        "Black Ops' turret and vehicle fire for players"
+    )
+}
+
+fn stack_fire_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.stack_fire",
+        "a stacked-barrel weapon's per-barrel spread and yaw offsets are not applied",
+        "the spread scale Black Ops' spread function takes for stacked fire"
+    )
+}
+
+fn ai_events_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.ai.bullet_events",
+        "actors are not told of bullets passing near them",
+        "Black Ops' AI event broadcast for bullets and the actors' reaction to it"
+    )
+}
+
+fn glass_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.glass",
+        "a bullet does not damage breakable glass with Black Ops' rules",
+        "Black Ops' glass pieces and their bullet damage in the runtime"
+    )
+}
+
+fn impact_explode_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.impact_explode",
+        "a bullet that explodes on impact does not explode",
+        "Black Ops' bullet impact explosion"
+    )
+}
+
+fn player_hit_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.player_hits",
+        "a bullet reaching another player neither hits nor passes them with Black Ops' rules",
+        "the other player's eye position for Black Ops' hit test and its player damage path"
+    )
+}
+
+fn delayed_death_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.ai.delayed_death",
+        "an actor that may not die takes lethal damage without Black Ops' delayed death",
+        "the actor states Black Ops' delayed death checks"
+    )
+}
+
+fn achievement_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.achievements",
+        "Black Ops' achievements are not awarded",
+        "the achievement awards and where they are reported"
+    )
+}
+
+/// The fire events this module runs, and the fire events it does not.
+pub(crate) fn server_events(
+    ps: &PlayerState,
+    aim_spread_before: f32,
+    view_before: [f32; 3],
+    signals: &[MoveSignal],
+    zombies: bool,
+    world: &mut dyn FireWorld,
+) -> Vec<&'static Unknown> {
+    let mut gaps = Vec::new();
+    for signal in signals {
+        let &MoveSignal::Event { event, parm } = signal else {
+            continue;
+        };
+        match event {
+            ev::FIRE_WEAPON
+            | ev::FIRE_WEAPON_LASTSHOT
+            | ev::FIRE_WEAPON_LEFT
+            | ev::FIRE_WEAPON_LASTSHOT_LEFT => {
+                let time = antilag_time(ps.command_time, world);
+                let shot = Shot {
+                    ps,
+                    aim_spread_before,
+                    view_before,
+                    zombies,
+                    gaps: &mut gaps,
+                };
+                shot.fire_weapon(time, parm, world);
+            }
+            ev::FIRE_MELEE | ev::USE_OFFHAND | ev::DETONATE | ev::GRENADE_SUICIDE => {
+                gaps.push(fire_unknown());
+            }
+            _ => {}
+        }
+    }
+    gaps.sort_by_key(|gap| gap.id);
+    gaps.dedup_by_key(|gap| gap.id);
+    gaps
+}
+
+/// The time a shot is fired at: the command's, no more than a second behind
+/// the match (`g_antilag`); the match's own time without antilag.
+fn antilag_time(command_time: i32, world: &dyn FireWorld) -> i32 {
+    let level = world.level_time();
+    if !dvar(world, "g_antilag", true) {
+        return level;
+    }
+    if level - command_time > 1000 {
+        level - 1000
+    } else {
+        command_time
+    }
+}
+
+fn dvar<T: DvarDefault>(world: &dyn FireWorld, name: &str, default: T) -> T {
+    world
+        .dvar(name)
+        .and_then(|value| T::parse(&value))
+        .unwrap_or(default)
+}
+
+trait DvarDefault: Sized {
+    fn parse(value: &str) -> Option<Self>;
+}
+
+impl DvarDefault for f32 {
+    fn parse(value: &str) -> Option<Self> {
+        value.trim().parse().ok()
+    }
+}
+
+impl DvarDefault for i32 {
+    fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        value
+            .parse()
+            .ok()
+            .or_else(|| value.parse::<f32>().ok().map(|f| f as i32))
+    }
+}
+
+impl DvarDefault for bool {
+    fn parse(value: &str) -> Option<Self> {
+        <i32 as DvarDefault>::parse(value).map(|n| n != 0)
+    }
+}
+
+/// The game's spread random: a Park–Miller generator behind a shuffle
+/// table the call rebuilds from the negated seed, so the draw is a function
+/// of the seed alone; the seed moves on.
+fn ran1(seed: &mut i32) -> f64 {
+    const AM: f64 = 1.0 / 2_147_483_647.0;
+    const RNMX: f64 = 0.99999988;
+    fn step(x: i32) -> i32 {
+        let k = x / 127_773;
+        let r = x
+            .wrapping_mul(16_807)
+            .wrapping_sub(k.wrapping_mul(0x7fff_ffff));
+        if r < 0 {
+            r.wrapping_add(0x7fff_ffff)
+        } else {
+            r
+        }
+    }
+    let mut idum = seed.wrapping_neg();
+    let mut table = [0i32; 32];
+    for j in (0..40).rev() {
+        idum = step(idum);
+        if j < 32 {
+            table[j] = idum;
+        }
+    }
+    *seed = step(idum);
+    let pick = (table[0] / (1 << 26)) as usize;
+    let value = f64::from(table[pick]) * AM;
+    if RNMX - value >= 0.0 { value } else { RNMX }
+}
+
+/// A random point in the unit circle from the seed.
+fn random_in_circle(mut seed: i32) -> (f32, f32) {
+    let angle = (ran1(&mut seed) * 360.0) as f32;
+    let radius = ran1(&mut seed) as f32;
+    let radians = angle * DEG2RAD;
+    let (sin, cos) = f64::from(radians).sin_cos();
+    (cos as f32 * radius, sin as f32 * radius)
+}
+
+fn length(v: [f32; 3]) -> f32 {
+    (v[2] * v[2] + v[0] * v[0] + v[1] * v[1]).sqrt()
+}
+
+fn normalized(v: [f32; 3]) -> [f32; 3] {
+    let len = length(v);
+    let len = if -len >= 0.0 { 1.0 } else { len };
+    let inv = 1.0 / len;
+    [v[0] * inv, v[1] * inv, v[2] * inv]
+}
+
+fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+/// `v * scale + base`.
+fn mad(base: [f32; 3], v: [f32; 3], scale: f32) -> [f32; 3] {
+    [
+        v[0] * scale + base[0],
+        v[1] * scale + base[1],
+        v[2] * scale + base[2],
+    ]
+}
+
+fn distance_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let d = sub(a, b);
+    d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+}
+
+/// Where a player's shot starts and the axes it is aimed by.
+struct WeaponParms {
+    forward: [f32; 3],
+    right: [f32; 3],
+    up: [f32; 3],
+    muzzle: [f32; 3],
+}
+
+/// One bullet's state along its path.
+#[derive(Clone, Copy)]
+struct BulletParams {
+    weapon_entity: i32,
+    ignore_entity: i32,
+    damage_multiplier: f32,
+    means: usize,
+    origin: [f32; 3],
+    start: [f32; 3],
+    end: [f32; 3],
+    dir: [f32; 3],
+    /// Enemies this bullet killed.
+    kills: i32,
+}
+
+/// One bullet trace and what it hit.
+#[derive(Clone, Copy, Default)]
+struct BulletResults {
+    trace: BulletTrace,
+    /// The entity hit; none for the world (except its sky).
+    hit_entity: Option<i32>,
+    hit_pos: [f32; 3],
+    ignore_hit_entity: bool,
+    depth_surface_type: i32,
+}
+
+impl BulletResults {
+    fn surface_type(&self) -> i32 {
+        (self.trace.surface_flags >> 20) as i32 & 0x3f
+    }
+}
+
+struct Shot<'a> {
+    ps: &'a PlayerState,
+    aim_spread_before: f32,
+    view_before: [f32; 3],
+    zombies: bool,
+    gaps: &'a mut Vec<&'static Unknown>,
+}
+
+impl Shot<'_> {
+    fn attacker(&self) -> i32 {
+        self.ps.client_num
+    }
+
+    /// A fired weapon: tells scripts, takes the weapon's spread and fires
+    /// the shot its weapon type makes.
+    fn fire_weapon(mut self, time: i32, parm: i32, world: &mut dyn FireWorld) {
+        if self.ps.pm_flags & PMF_MOUNTED_FIRE != 0 {
+            self.gaps.push(mounted_unknown());
+            return;
+        }
+        let weapon = self.ps.weapon;
+        world.notify(self.attacker(), "weapon_fired", Some(weapon));
+        // The shot's own copy: the world is traced and damaged while the
+        // definition is read.
+        let Some((def_bytes, variant_bytes)) = world
+            .weapon(weapon)
+            .map(|w| (w.def.clone(), w.variant.clone()))
+        else {
+            self.gaps.push(crate::movement::weapon_unknown());
+            return;
+        };
+        let Some(def) = WeaponDefView::new(&def_bytes, &variant_bytes) else {
+            self.gaps.push(crate::movement::weapon_unknown());
+            return;
+        };
+        let parms = self.weapon_parms(&def, parm, world);
+        let aim_frac = self.aim_spread_before * (1.0 / 255.0f32);
+        let (mut min, max) = self.spread(&def, world);
+        if self.ps.weapon_pos_frac == 1.0 {
+            min = def.ads_spread();
+        }
+        let spread = (max - min) * aim_frac + min;
+        match def.weapon_type() {
+            WEAPTYPE_BULLET => self.bullet_fire(&def, weapon, spread, &parms, time, world),
+            _ => self.gaps.push(fire_unknown()),
+        }
+    }
+
+    /// The player's eye and the axes of the aim.
+    fn weapon_parms(
+        &mut self,
+        def: &WeaponDefView<'_>,
+        _parm: i32,
+        world: &dyn FireWorld,
+    ) -> WeaponParms {
+        self.gaps.push(gun_angles_unknown());
+        let mut angles = self.view_before;
+        angles[2] = self.ps.viewangles[2];
+        if def.fire_type() == FIRETYPE_STACKED && self.ps.stack_fire_count > 1 {
+            self.gaps.push(stack_fire_unknown());
+        }
+        let (forward, right, up) = movement_t5::math::angle_vectors(angles);
+        let muzzle = mad(
+            self.view_origin(),
+            forward,
+            dvar(world, "bg_gunXOffset", 0.0f32),
+        );
+        WeaponParms {
+            forward,
+            right,
+            up,
+            muzzle,
+        }
+    }
+
+    /// The player's eye: origin, eye height and lean.
+    fn view_origin(&self) -> [f32; 3] {
+        let ps = self.ps;
+        let mut eye = ps.origin;
+        eye[2] += ps.view_height_current;
+        if ps.leanf != 0.0 {
+            let frac = (2.0 - ps.leanf.abs()) * ps.leanf;
+            let roll = frac * 16.0;
+            let (_, right, _) = movement_t5::math::angle_vectors([0.0, ps.viewangles[1], roll]);
+            eye = mad(eye, right, frac * 20.0);
+        }
+        eye
+    }
+
+    /// The hip spread at the player's eye height, and what overrides it.
+    fn spread(&self, def: &WeaponDefView<'_>, world: &dyn FireWorld) -> (f32, f32) {
+        let ps = self.ps;
+        let (mut min, mut max);
+        if ps.spread_override_state == 2 {
+            min = ps.spread_override as f32;
+            max = ps.spread_override as f32;
+        } else {
+            let height = ps.view_height_current;
+            if height <= CROUCH_EYE {
+                let frac = (height - PRONE_EYE) * 0.0344827585;
+                min = (def.hip_spread_ducked_min() - def.hip_spread_prone_min()) * frac
+                    + def.hip_spread_prone_min();
+                max = (def.hip_spread_ducked_max() - def.hip_spread_prone_max()) * frac
+                    + def.hip_spread_prone_max();
+            } else {
+                let frac = (height - CROUCH_EYE) * 0.0500000007;
+                min = (def.hip_spread_stand_min() - def.hip_spread_ducked_min()) * frac
+                    + def.hip_spread_ducked_min();
+                max = (def.hip_spread_max() - def.hip_spread_ducked_max()) * frac
+                    + def.hip_spread_ducked_max();
+            }
+        }
+        if ps.spread_override_state == 1 {
+            max = ps.spread_override as f32;
+        }
+        if self.zombies && ps.perks & PERK_DEADSHOT != 0 && ps.weapon_pos_frac < 1.0 {
+            let scale = dvar(world, "perk_weapSpreadMultiplier", 0.65f32);
+            min *= scale;
+            max *= scale;
+        }
+        (min, max)
+    }
+
+    /// A bullet shot: each pellet's end from its seed, then its trace.
+    fn bullet_fire(
+        &mut self,
+        def: &WeaponDefView<'_>,
+        weapon: u32,
+        spread: f32,
+        parms: &WeaponParms,
+        time: i32,
+        world: &mut dyn FireWorld,
+    ) {
+        let (shots, range) = if def.weapon_class() == WEAPCLASS_SPREAD {
+            (def.shot_count(), def.min_damage_range())
+        } else {
+            (1, dvar(world, "bulletrange", 8192.0f32))
+        };
+        let attacker = self.attacker();
+        for shot in 0..shots {
+            let (end, dir) = bullet_end(time.wrapping_add(shot), spread, parms, range);
+            let mut bp = BulletParams {
+                weapon_entity: attacker,
+                ignore_entity: attacker,
+                damage_multiplier: 1.0,
+                means: if def.rifle_bullet() {
+                    MOD_RIFLE_BULLET
+                } else {
+                    MOD_PISTOL_BULLET
+                },
+                origin: parms.muzzle,
+                start: parms.muzzle,
+                end,
+                dir,
+                kills: 0,
+            };
+            if def.penetrate_type() != 0 && !def.bullet_impact_explode() {
+                self.fire_penetrate(def, weapon, &mut bp, world);
+            } else {
+                self.fire_extended(def, weapon, &mut bp, world);
+            }
+        }
+    }
+
+    /// One trace of the bullet and what it hit; false when it hit
+    /// nothing. The results hold the trace either way.
+    fn bullet_trace(
+        &mut self,
+        bp: &BulletParams,
+        last_surface_type: i32,
+        world: &mut dyn FireWorld,
+    ) -> (bool, BulletResults) {
+        let mut br = BulletResults {
+            trace: world.bullet_trace(bp.start, bp.end, bp.ignore_entity, BULLET_MASK),
+            ..BulletResults::default()
+        };
+        let sky = br.trace.surface_flags & surf::SKY != 0;
+        if br.trace.hit == BulletHitType::None && !sky {
+            return (false, br);
+        }
+        let id = hit_id(&br.trace);
+        br.hit_entity = (id != ENTITY_WORLD && id != ENTITY_NONE).then_some(id);
+        if sky {
+            br.hit_entity = Some(id);
+        }
+        let fraction = br.trace.fraction;
+        br.hit_pos = [
+            (bp.end[0] - bp.start[0]) * fraction + bp.start[0],
+            (bp.end[1] - bp.start[1]) * fraction + bp.start[1],
+            (bp.end[2] - bp.start[2]) * fraction + bp.start[2],
+        ];
+        if let Some(hit) = br.hit_entity {
+            let entity = world.entity(hit);
+            if entity.is_some_and(sentient) && br.trace.surface_flags == 0 {
+                br.trace.surface_flags = surf::FLESH;
+            }
+            br.ignore_hit_entity = self.ignore_hit_entity(hit, entity);
+        }
+        br.depth_surface_type = br.surface_type();
+        if br.trace.surface_flags & surf::NOPENETRATE != 0 {
+            br.depth_surface_type = 0;
+            return (true, br);
+        }
+        if br.depth_surface_type == 0 && last_surface_type != 0 {
+            br.depth_surface_type = last_surface_type;
+        }
+        (true, br)
+    }
+
+    /// A bullet passes through its shooter; another player it reaches is
+    /// tested against that player's eye, which the match does not give.
+    fn ignore_hit_entity(&mut self, hit: i32, entity: Option<FireEntity>) -> bool {
+        if hit == self.attacker() {
+            return true;
+        }
+        if entity.is_some_and(|e| e.kind == FireEntityKind::Player) {
+            self.gaps.push(player_hit_unknown());
+            return true;
+        }
+        false
+    }
+
+    /// A bullet that does not penetrate goes on only
+    /// past surfaces without impacts, and a rifle bullet through bodies at
+    /// half damage.
+    fn fire_extended(
+        &mut self,
+        def: &WeaponDefView<'_>,
+        weapon: u32,
+        bp: &mut BulletParams,
+        world: &mut dyn FireWorld,
+    ) {
+        for _ in 0..BULLET_EXTENDED_SEGMENTS {
+            let (hit, br) = self.bullet_trace(bp, 0, world);
+            if !hit {
+                return;
+            }
+            self.bullet_hit(def, weapon, bp, &br, 0, true, world);
+            if br.trace.surface_flags & surf::NOIMPACT != 0 {
+                if !advance_trace(bp, &br, 0.135) {
+                    return;
+                }
+                continue;
+            }
+            let Some(entity) = br.hit_entity.and_then(|e| world.entity(e)) else {
+                return;
+            };
+            if !entity.takes_damage {
+                return;
+            }
+            if !br.ignore_hit_entity {
+                if !def.rifle_bullet() || !sentient(entity) {
+                    return;
+                }
+                bp.damage_multiplier *= 0.5;
+            }
+            advance_trace(bp, &br, 0.0);
+        }
+    }
+
+    /// A penetrating bullet goes through surfaces as deep as
+    /// the penetration table lets it, losing damage by their thickness.
+    fn fire_penetrate(
+        &mut self,
+        def: &WeaponDefView<'_>,
+        weapon: u32,
+        bp: &mut BulletParams,
+        world: &mut dyn FireWorld,
+    ) {
+        let (hit, mut br) = self.bullet_trace(bp, 0, world);
+        if !hit {
+            return;
+        }
+        let mut flags = self.bullet_hit(def, weapon, bp, &br, 0, true, world);
+        if def.bullet_impact_explode() {
+            return;
+        }
+        let count = dvar(world, "penetrationCount", 2i32);
+        let min_fx = dvar(world, "bullet_penetrationMinFxDist", 30.0f32);
+        let depth_of = |world: &dyn FireWorld, surface: i32| {
+            if surface == 0 {
+                0.0
+            } else {
+                world
+                    .penetration_depth(def.penetrate_type(), surface)
+                    .unwrap_or(0.0)
+            }
+        };
+        for _ in 0..count {
+            let mut max_depth = depth_of(world, br.depth_surface_type);
+            if br.trace.surface_flags & surf::SKY != 0 {
+                max_depth = 100.0;
+            }
+            if self.zombies && br.surface_type() == surf::WATER {
+                max_depth = 100.0;
+            } else if max_depth <= 0.0 {
+                return;
+            }
+            let last_hit_pos = br.hit_pos;
+            if !advance_trace(bp, &br, 0.135) {
+                return;
+            }
+            let hit;
+            (hit, br) = self.bullet_trace(bp, br.depth_surface_type, world);
+            if let Some(entity) = br.hit_entity.and_then(|e| world.entity(e))
+                && entity.kind == FireEntityKind::Player
+            {
+                return;
+            }
+            // The way back: from the next hit (or the bullet's end) to just
+            // past where it went in.
+            let mut rev_bp = *bp;
+            rev_bp.dir = [-bp.dir[0], -bp.dir[1], -bp.dir[2]];
+            rev_bp.start = bp.end;
+            rev_bp.end = mad(last_hit_pos, rev_bp.dir, 0.01);
+            let mut rev_br = br;
+            rev_br.trace.normal = [
+                -br.trace.normal[0],
+                -br.trace.normal[1],
+                -br.trace.normal[2],
+            ];
+            if hit {
+                advance_trace(&mut rev_bp, &rev_br, 0.01);
+            }
+            let rev_hit;
+            (rev_hit, rev_br) = self.bullet_trace(&rev_bp, rev_br.depth_surface_type, world);
+            let all_solid = (rev_hit && rev_br.trace.all_solid)
+                || (br.trace.start_solid && rev_br.trace.start_solid);
+            if rev_br.trace.surface_flags & surf::SKY != 0 {
+                rev_br.hit_entity = Some(hit_id(&rev_br.trace));
+            }
+            if !rev_hit && !all_solid {
+                if !hit {
+                    return;
+                }
+                let impact = distance_sq(br.hit_pos, last_hit_pos) > min_fx * min_fx;
+                flags = self.bullet_hit(def, weapon, bp, &br, dflags::PENETRATED, impact, world);
+                continue;
+            }
+            let span = if all_solid {
+                sub(rev_bp.end, rev_bp.start)
+            } else {
+                sub(last_hit_pos, rev_br.hit_pos)
+            };
+            let thickness = length_zyx(span).max(1.0);
+            let depth = if rev_hit {
+                let rev_depth = depth_of(world, rev_br.depth_surface_type);
+                let depth = if rev_depth - max_depth < 0.0 {
+                    rev_depth
+                } else {
+                    max_depth
+                };
+                if rev_br.trace.surface_flags & surf::SKY != 0 {
+                    100.0
+                } else if depth <= 0.0 {
+                    return;
+                } else {
+                    depth
+                }
+            } else {
+                max_depth
+            };
+            bp.damage_multiplier -= thickness / depth;
+            if bp.damage_multiplier <= 0.0 {
+                return;
+            }
+            if !all_solid {
+                let impact = distance_sq(rev_br.hit_pos, br.hit_pos) > min_fx * min_fx;
+                if impact && (!hit || br.trace.surface_flags & surf::SKY == 0) {
+                    self.impact(weapon, &rev_bp, &rev_br, flags | 0x4, true, bp.dir, world);
+                }
+                if !hit {
+                    return;
+                }
+                flags = self.bullet_hit(def, weapon, bp, &br, dflags::PENETRATED, impact, world);
+            }
+            if !hit {
+                return;
+            }
+        }
+    }
+
+    /// A bullet's hit: its damage at its range, damage triggers on its
+    /// path, its impact and the damage to the entity it hit.
+    /// Returns the impact's flags: 1 a head was hit, 2 the hit killed.
+    #[allow(clippy::too_many_arguments)]
+    fn bullet_hit(
+        &mut self,
+        def: &WeaponDefView<'_>,
+        weapon: u32,
+        bp: &mut BulletParams,
+        br: &BulletResults,
+        mut damage_flags: i32,
+        impact: bool,
+        world: &mut dyn FireWorld,
+    ) -> u8 {
+        let attacker = self.attacker();
+        self.gaps.push(ai_events_unknown());
+        let damage = bullet_damage(def, bp, br);
+        world.damage_triggers(attacker, bp.start, br.hit_pos, damage, MEANS[bp.means]);
+        let mut out_flags = 0u8;
+        if def.bullet_impact_explode() && def.explosion_inner_damage() != 0 {
+            self.gaps.push(impact_explode_unknown());
+        }
+        if let Some(hit) = br.hit_entity
+            && let Some(entity) = world.entity(hit)
+            && entity.takes_damage
+            && !br.ignore_hit_entity
+        {
+            if def.armor_piercing() {
+                damage_flags |= dflags::NO_ARMOR;
+            }
+            let was_alive = entity.health > 0;
+            let location = br.trace.hit_location;
+            if location == 1 || location == 2 {
+                out_flags |= 1;
+            }
+            self.damage(
+                hit,
+                entity,
+                bp,
+                br.hit_pos,
+                damage,
+                damage_flags,
+                weapon,
+                location,
+                br.trace.bone,
+                world,
+            );
+            let alive = world.entity(hit).is_some_and(|e| e.health > 0);
+            if was_alive && !alive {
+                out_flags |= 2;
+                let attacker_team = world.entity(attacker).and_then(|e| e.team);
+                let victim_team = (entity.kind == FireEntityKind::Actor)
+                    .then_some(entity.team)
+                    .flatten();
+                if let (Some(a), Some(v)) = (attacker_team, victim_team)
+                    && a != v
+                {
+                    bp.kills += 1;
+                    if bp.kills == 3 {
+                        self.gaps.push(achievement_unknown());
+                    }
+                    if bp.kills >= dvar(world, "bullet_multikill_shots", 2i32) {
+                        world.notify(attacker, "multikill", None);
+                    }
+                }
+            }
+        }
+        if matches!(br.trace.hit, BulletHitType::Glass(_)) {
+            self.gaps.push(glass_unknown());
+        }
+        if impact {
+            self.impact(weapon, bp, br, out_flags, false, br.trace.normal, world);
+        }
+        out_flags
+    }
+
+    /// The bullet's impact event, where Black Ops makes one.
+    #[allow(clippy::too_many_arguments)]
+    fn impact(
+        &self,
+        weapon: u32,
+        bp: &BulletParams,
+        br: &BulletResults,
+        flags: u8,
+        exit: bool,
+        normal: [f32; 3],
+        world: &mut dyn FireWorld,
+    ) {
+        if br.ignore_hit_entity {
+            return;
+        }
+        if br.trace.surface_flags & surf::SKY != 0 || br.trace.fraction >= 1.0 {
+            return;
+        }
+        let entity = br.hit_entity.and_then(|e| world.entity(e));
+        let player = entity.is_some_and(|e| e.kind == FireEntityKind::Player);
+        let actor = entity.is_some_and(|e| e.kind == FireEntityKind::Actor);
+        let client_side = dvar(world, "sv_clientSideBullets", true);
+        world.impact(&BulletImpact {
+            attacker: bp.weapon_entity,
+            weapon,
+            start: bp.start,
+            point: br.hit_pos,
+            normal,
+            surface_type: br.surface_type() as u8,
+            surface_flags: br.trace.surface_flags,
+            entity: br.hit_entity.unwrap_or(ENTITY_NONE),
+            flags,
+            exit,
+            from_server: player || actor || !client_side,
+        });
+    }
+
+    /// The server's damage to what a player's bullet hits.
+    #[allow(clippy::too_many_arguments)]
+    fn damage(
+        &mut self,
+        target: i32,
+        entity: FireEntity,
+        bp: &BulletParams,
+        point: [f32; 3],
+        mut amount: i32,
+        flags: i32,
+        weapon: u32,
+        location: i32,
+        bone: Option<u16>,
+        world: &mut dyn FireWorld,
+    ) {
+        let attacker = self.attacker();
+        if entity.kind == FireEntityKind::Player {
+            self.gaps.push(player_hit_unknown());
+            return;
+        }
+        let attacker_team = world.entity(attacker).and_then(|e| e.team);
+        if entity.kind == FireEntityKind::Actor
+            && dvar_string(world, "g_gametype").as_deref() == Some("vs")
+            && entity.team.is_some()
+            && entity.team == attacker_team
+        {
+            return;
+        }
+        if entity.kind == FireEntityKind::Actor
+            && !entity.ignore_locational_damage
+            && bp.means != MOD_MELEE
+        {
+            let scale = location_multiplier(location, weapon, world);
+            let capped = matches!(entity.ai_type, Some("zombie" | "dog"));
+            let scale = if capped && scale > 1.0 {
+                1.0
+            } else if scale == 0.0 {
+                return;
+            } else {
+                scale
+            };
+            amount = (amount as f32 * scale) as i32;
+            if amount < 1 {
+                amount = 1;
+            }
+        }
+        if entity.god {
+            return;
+        }
+        amount = amount.max(1);
+        if entity.kind == FireEntityKind::Actor && !entity.allow_death && amount >= entity.health {
+            self.gaps.push(delayed_death_unknown());
+        }
+        if flags & dflags::RADIUS == 0 && entity.demigod && entity.health <= amount {
+            amount = entity.health - 1;
+        }
+        if amount == 0 {
+            return;
+        }
+        world.damage(&FireDamage {
+            target,
+            inflictor: attacker,
+            attacker,
+            dir: normalized(bp.dir),
+            point,
+            amount,
+            flags,
+            means: MEANS[bp.means],
+            weapon,
+            hit_location: HIT_LOCATIONS
+                .get(location as usize)
+                .copied()
+                .unwrap_or("none"),
+            bone,
+        });
+    }
+}
+
+fn dvar_string(world: &dyn FireWorld, name: &str) -> Option<String> {
+    world.dvar(name)
+}
+
+fn sentient(entity: FireEntity) -> bool {
+    matches!(entity.kind, FireEntityKind::Player | FireEntityKind::Actor)
+}
+
+fn length_zyx(v: [f32; 3]) -> f32 {
+    (v[2] * v[2] + v[1] * v[1] + v[0] * v[0]).sqrt()
+}
+
+/// The entity number a trace hit: the world for glass, none for nothing.
+fn hit_id(trace: &BulletTrace) -> i32 {
+    match trace.hit {
+        BulletHitType::Entity(n) => n,
+        BulletHitType::Glass(_) => ENTITY_WORLD,
+        BulletHitType::None => ENTITY_NONE,
+    }
+}
+
+/// The damage multiplier at a hit location: a bullet weapon's own table,
+/// else the game's.
+fn location_multiplier(location: i32, weapon: u32, world: &dyn FireWorld) -> f32 {
+    let at = usize::try_from(location).unwrap_or(0);
+    if weapon != 0
+        && let Some(w) = world.weapon(weapon)
+        && WeaponDefView::new(&w.def, &w.variant)
+            .is_some_and(|def| def.weapon_type() == WEAPTYPE_BULLET)
+    {
+        return w
+            .location_damage
+            .as_deref()
+            .and_then(|table| table.get(at).copied())
+            .unwrap_or(1.0);
+    }
+    world.hit_location_multiplier(location).unwrap_or(1.0)
+}
+
+/// A bullet's damage: the weapon's damage falling off from its far end of
+/// full damage to its near end of least damage, scaled by what the bullet
+/// still carries.
+fn bullet_damage(def: &WeaponDefView<'_>, bp: &BulletParams, br: &BulletResults) -> i32 {
+    let base = def.damage();
+    let least = def.min_damage();
+    let near = def.max_damage_range();
+    let far = def.min_damage_range();
+    let span = far - near;
+    let mut out = base;
+    if base != least && span != 0.0 {
+        let d = sub(br.hit_pos, bp.origin);
+        let dist = (d[1] * d[1] + d[0] * d[0] + d[2] * d[2]).sqrt();
+        if near <= dist {
+            out = least;
+            if dist < far {
+                let frac = (dist - near) / span;
+                let blended = ((1.0 - frac) * base as f32 + least as f32 * frac) as i32;
+                return (blended as f32 * bp.damage_multiplier) as i32;
+            }
+        }
+    }
+    (out as f32 * bp.damage_multiplier) as i32
+}
+
+/// The next trace starts where this one hit, moved on
+/// through world surfaces by `dist` along the surface's normal.
+fn advance_trace(bp: &mut BulletParams, br: &BulletResults, dist: f32) -> bool {
+    let id = hit_id(&br.trace);
+    bp.ignore_entity = id;
+    if id == ENTITY_WORLD && dist > 0.0 {
+        let n = br.trace.normal;
+        let dot = -(bp.dir[2] * n[2] + bp.dir[1] * n[1] + bp.dir[0] * n[0]);
+        if dot < 0.125 {
+            bp.start = mad(br.hit_pos, bp.dir, dist * 8.0);
+            return false;
+        }
+        bp.start = mad(br.hit_pos, bp.dir, dist / dot);
+        return true;
+    }
+    bp.start = br.hit_pos;
+    true
+}
+
+/// A pellet's end and direction: its seeded point in the spread circle at
+/// the end of its range.
+fn bullet_end(seed: i32, spread: f32, parms: &WeaponParms, range: f32) -> ([f32; 3], [f32; 3]) {
+    let aim = libm_tan(spread * DEG2RAD) * range;
+    let (x, y) = random_in_circle(seed);
+    let mut end = mad(parms.muzzle, parms.forward, range);
+    end = mad(end, parms.right, x * aim);
+    end = mad(end, parms.up, y * aim);
+    (end, normalized(sub(end, parms.muzzle)))
+}
+
+fn libm_tan(x: f32) -> f32 {
+    f64::from(x).tan() as f32
+}

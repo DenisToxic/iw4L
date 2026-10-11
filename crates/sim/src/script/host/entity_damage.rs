@@ -16,6 +16,8 @@ pub(crate) struct EntityHit {
     pub dir: [f32; 3],
     pub bone: Option<usize>,
     pub flags: i32,
+    /// The hit location the game named; else the bone's.
+    pub hit_location: Option<&'static str>,
 }
 
 const MEANS: &[&str] = &[
@@ -132,6 +134,7 @@ pub(crate) fn apply_script_blasts(world: &mut World, tick: crate::Tick) {
                         dir: std::array::from_fn(|i| at[i] - hit.origin[i]),
                         bone: None,
                         flags: hit.flags,
+                        hit_location: None,
                     },
                 );
             }
@@ -161,6 +164,7 @@ pub(crate) fn apply_script_blasts(world: &mut World, tick: crate::Tick) {
                     dir: std::array::from_fn(|i| mid[i] - blast.origin[i]),
                     bone: None,
                     flags: 1,
+                    hit_location: None,
                 },
             );
         }
@@ -431,4 +435,71 @@ pub(crate) fn destructible_debris(
     world
         .resource_mut::<super::mechanics::Mechanics>()
         .launch_piece(object, velocity, offset, half);
+}
+
+/// What a game's shot reads of a script entity it reaches.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ShotTarget {
+    pub actor: bool,
+    pub takes_damage: bool,
+    pub health: i32,
+    pub team: Option<&'static str>,
+    pub ai_type: Option<&'static str>,
+    pub ignore_locational_damage: bool,
+    pub allow_death: bool,
+}
+
+pub(crate) fn shot_target(world: &mut World, target: ScriptModelId) -> Option<ShotTarget> {
+    let mut runtime = world.get_resource_mut::<RoundScript>()?;
+    let object = runtime.presented_by(target)?;
+    let entity = &runtime.entities[&object];
+    let actor = entity.kind == super::entities::EntityKind::Actor;
+    let takes_damage = entity.accepts_damage(0);
+    let int = |value: Value| match value {
+        Value::Int(n) => Some(n),
+        Value::Float(f) => Some(f as i32),
+        _ => None,
+    };
+    let named = |value: Value, names: &[&'static str]| match value {
+        Value::String(text) => names
+            .iter()
+            .copied()
+            .find(|name| name.as_bytes() == text.as_bytes()),
+        _ => None,
+    };
+    let health = int(runtime.object_field(object, "health")).unwrap_or(0);
+    let team = named(
+        runtime.object_field(object, "team"),
+        &["axis", "allies", "neutral"],
+    );
+    let ai_type = named(
+        runtime.object_field(object, "type"),
+        &["human", "zombie", "zombie_dog", "dog"],
+    )
+    .filter(|_| actor);
+    let ignore_locational_damage =
+        int(runtime.object_field(object, "ignorelocationaldamage")).is_some_and(|n| n != 0);
+    // Black Ops spawns its actors with allowdeath off.
+    let allow_death = int(runtime.object_field(object, "allowdeath")).is_some_and(|n| n != 0);
+    Some(ShotTarget {
+        actor,
+        takes_damage,
+        health,
+        team,
+        ai_type,
+        ignore_locational_damage,
+        allow_death,
+    })
+}
+
+/// Notifies `name` on a player, with a weapon's name when given.
+pub(crate) fn notify_player(world: &mut World, client: u32, name: &str, weapon: Option<&str>) {
+    let receiver = super::players::player_object(world, client);
+    if matches!(receiver, Value::Undefined) {
+        return;
+    }
+    let args = weapon
+        .map(|weapon| vec![Value::string(weapon)])
+        .unwrap_or_default();
+    raise(world, receiver, name, args);
 }

@@ -142,7 +142,7 @@ pub(crate) fn damage(
         Value::string(weapon),
         Value::Vector(hit.point),
         Value::Vector(hit.dir),
-        Value::string(hit_location(tag)),
+        Value::string(hit.hit_location.unwrap_or_else(|| hit_location(tag))),
         Value::Int(0),
         Value::Int(0),
     ];

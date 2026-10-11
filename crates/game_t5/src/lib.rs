@@ -1,4 +1,5 @@
 mod catalog;
+mod fire;
 mod menu_expression;
 mod movement;
 mod zombie_catalog;

@@ -891,6 +891,8 @@ pub enum TraceOutcome {
     StartSolid {
         collider: Option<ColliderId>,
         end: [f32; 3],
+        /// The whole trace stayed in solid.
+        all_solid: bool,
     },
     Invalid {
         reason: TraceInvalidReason,
@@ -1327,6 +1329,7 @@ fn bullet_trace_filtered(
         return TraceOutcome::StartSolid {
             collider: Some(world_collider),
             end: query.start,
+            all_solid: world.allsolid != 0,
         };
     }
     if world.fraction < 1.0 {
@@ -1371,6 +1374,7 @@ fn bullet_trace_filtered(
                         return TraceOutcome::StartSolid {
                             collider: Some(collider),
                             end: query.start,
+                            all_solid: false,
                         };
                     }
                     RayAabb::Hit(mut c) => {
@@ -1393,6 +1397,7 @@ fn bullet_trace_filtered(
                         hitloc: 0,
                     }),
                     end: query.start,
+                    all_solid: false,
                 };
             }
             RayAabb::Hit(c) => candidates.push(c),
@@ -1441,6 +1446,7 @@ fn bullet_trace_filtered(
                 return TraceOutcome::StartSolid {
                     collider: Some(collider),
                     end: query.start,
+                    all_solid: hit.allsolid != 0,
                 };
             }
             if hit.fraction < 1.0 {
@@ -1479,6 +1485,7 @@ fn bullet_trace_filtered(
                     return TraceOutcome::StartSolid {
                         collider: Some(collider),
                         end: query.start,
+                        all_solid: false,
                     };
                 }
                 RayAabb::Hit(candidate) => candidates.push(candidate),
@@ -2279,6 +2286,7 @@ fn select_first_hit(query: &BulletTraceQuery, candidates: &mut [TraceCandidate])
         return TraceOutcome::StartSolid {
             collider: Some(best.collider),
             end: query.start,
+            all_solid: false,
         };
     }
     TraceOutcome::Hit {
