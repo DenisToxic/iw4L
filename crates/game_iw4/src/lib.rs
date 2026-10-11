@@ -94,8 +94,11 @@ impl game_api::MenuLayout for MenuLayout {
     fn text_scale(&self, pixel_height: i32, text_scale: f32) -> f32 {
         hud_iw4::normalized_text_scale(pixel_height, text_scale)
     }
-    fn text_height(&self, text_scale: f32) -> f32 {
+    fn text_height(&self, _pixel_height: i32, text_scale: f32) -> f32 {
         hud_iw4::ui_text_height(text_scale)
+    }
+    fn text_width(&self, glyph_width: i32, pixel_height: i32, text_scale: f32) -> f32 {
+        glyph_width as f32 * hud_iw4::normalized_text_scale(pixel_height, text_scale)
     }
     fn text_origin(
         &self,

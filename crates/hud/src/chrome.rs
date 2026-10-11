@@ -478,7 +478,7 @@ fn paint_text(
     );
     for (line, text) in lines.into_iter().enumerate() {
         let measured_w = layout_text_width(layout, font, &text, item.text_scale);
-        let measured_h = layout.text_height(item.text_scale);
+        let measured_h = layout.text_height(font.pixel_height, item.text_scale);
         let rect = &style.rect;
         let (x, y) = layout.text_origin(
             [rect.x, rect.y, rect.w, rect.h],
@@ -600,7 +600,7 @@ pub(crate) fn push_owner_text(
     };
     let layout = args.assets.layout().ok_or(ChromeGapKind::Layout)?;
     let measured_w = layout_text_width(layout, font, text, args.item.text_scale);
-    let measured_h = layout.text_height(args.item.text_scale);
+    let measured_h = layout.text_height(font.pixel_height, args.item.text_scale);
     let (x, y) = layout.text_origin(
         [args.rect.x, args.rect.y, args.rect.w, args.rect.h],
         args.item.text_align_mode,
@@ -793,7 +793,7 @@ pub(crate) fn layout_text_width(
     text: &str,
     text_scale: f32,
 ) -> f32 {
-    text_width(font, text) as f32 * layout.text_scale(font.pixel_height, text_scale)
+    layout.text_width(text_width(font, text), font.pixel_height, text_scale)
 }
 
 pub(crate) fn ui_text_width(font: &FontDef, text: &str, text_scale: f32) -> f32 {

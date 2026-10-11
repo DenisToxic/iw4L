@@ -220,8 +220,12 @@ pub trait GameMenus: Sync {
 pub trait MenuLayout: Sync {
     /// The glyph scale of a font of `pixel_height` drawn at `text_scale`.
     fn text_scale(&self, pixel_height: i32, text_scale: f32) -> f32;
-    /// The height a line of text takes at `text_scale`.
-    fn text_height(&self, text_scale: f32) -> f32;
+    /// The height a line of text in a font of `pixel_height` takes at
+    /// `text_scale`.
+    fn text_height(&self, pixel_height: i32, text_scale: f32) -> f32;
+    /// The width of text whose glyphs advance `glyph_width` in a font of
+    /// `pixel_height`, at `text_scale`.
+    fn text_width(&self, glyph_width: i32, pixel_height: i32, text_scale: f32) -> f32;
     /// Where an item's text starts inside its rect `[x, y, w, h]`.
     #[allow(clippy::too_many_arguments)]
     fn text_origin(
