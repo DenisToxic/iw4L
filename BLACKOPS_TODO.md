@@ -22,10 +22,11 @@ off until Black Ops' own are recovered (each is an `unknown!` id in
 [`docs/fidelity/t5.md`](docs/fidelity/t5.md)). The player moves on Black Ops'
 own movement (`movement_t5`; ladders, mantling, swimming and its movement
 events are still open) and Black Ops' weapon rules: bullet shots, melee
-blows, rockets (the Ray Gun) and script blasts run Black Ops' own server
-rules (spread, pellets, penetration, melee traces, missiles, blasts,
-damage); grenades are still open (`t5.weapons.fire`). There is
-no HUD
+blows, rockets (the Ray Gun), thrown grenades and script blasts run Black
+Ops' own server rules (spread, pellets, penetration, melee traces, missiles,
+grenade bounces and fuses, blasts, damage); grenade launchers, sticky and
+special grenades are still open (`t5.weapons.fire`, `t5.weapons.grenade`).
+There is no HUD
 (`t5.hud.code_hud`, `t5.hud.menu_layout`), no last stand
 (`t5.match.last_stand`) and no Modern Warfare 2 sounds. The work now is
 recovering those rules from Black Ops. Start it from the game library

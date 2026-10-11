@@ -790,4 +790,24 @@ impl<'a> WeaponDefView<'a> {
     pub fn is_rolling_grenade(&self) -> i32 {
         i32::from_le_bytes(Self::word(self.def, 0x5ac))
     }
+
+    /// `aiFuseTime`
+    pub fn ai_fuse_time(&self) -> i32 {
+        i32::from_le_bytes(Self::word(self.def, 0x470))
+    }
+
+    /// `timedDetonation`
+    pub fn timed_detonation(&self) -> bool {
+        self.def[0x63a] != 0
+    }
+
+    /// `rotate`
+    pub fn rotate(&self) -> bool {
+        self.def[0x63c] != 0
+    }
+
+    /// `keepRolling`
+    pub fn keep_rolling(&self) -> bool {
+        self.def[0x63d] != 0
+    }
 }
