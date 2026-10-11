@@ -152,6 +152,8 @@ pub struct ZoneEntities {
 pub struct ZoneScripts {
     /// Module name (`scripts/…/x.gsc`) and its compiled bytes.
     pub modules: Vec<(String, Vec<u8>)>,
+    /// Config raw files (`….cfg`) and their text.
+    pub configs: Vec<(String, String)>,
     pub report: Vec<String>,
 }
 

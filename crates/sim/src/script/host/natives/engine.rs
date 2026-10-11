@@ -288,7 +288,7 @@ fn trace_passed(world: &mut World, start: [f32; 3], end: [f32; 3], mask: u32) ->
     t.fraction >= 1.0 && t.startsolid == 0
 }
 
-fn matching_entities(world: &mut World, args: &[Value]) -> Result<Vec<u64>, String> {
+pub(crate) fn matching_entities(world: &mut World, args: &[Value]) -> Result<Vec<u64>, String> {
     let value = string(args, 0)?;
     let key = string(args, 1)?.to_ascii_lowercase();
     let mut runtime = runtime(world);
@@ -315,7 +315,7 @@ fn classname_prefix(world: &World, ids: Vec<u64>, prefix: &str) -> Vec<u64> {
         .collect()
 }
 
-fn single(ids: Vec<u64>, what: &str) -> Result<Value, String> {
+pub(crate) fn single(ids: Vec<u64>, what: &str) -> Result<Value, String> {
     match ids.as_slice() {
         [] => Ok(Value::Undefined),
         [id] => Ok(Value::Object(*id)),

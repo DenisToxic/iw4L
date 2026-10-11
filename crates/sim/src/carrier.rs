@@ -217,6 +217,13 @@ impl SimWorld {
         crate::script::host::natives::iw4::register_local_presentation_dvars(&mut self.ecs, local);
     }
 
+    /// The gametype's settings the scripts read (`GetGametypeSetting`).
+    pub fn set_gametype_settings(&mut self, settings: Vec<(String, String)>) {
+        self.ecs.insert_resource(crate::script::GametypeSettings(
+            settings.into_iter().collect(),
+        ));
+    }
+
     pub fn set_gsc_dvar(&mut self, name: &str, value: &str) {
         crate::script::set_dvar(&mut self.ecs, name, value);
     }

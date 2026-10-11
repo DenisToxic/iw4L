@@ -51,6 +51,8 @@ impl game_api::GameScripts for T5 {
             roots: startup.roots,
             entries: startup.entries,
             built: None,
+            settings: Vec::new(),
+            key_types: Vec::new(),
         })
     }
 

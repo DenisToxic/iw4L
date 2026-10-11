@@ -5,6 +5,12 @@ const INLINE: i64 = -1;
 /// The asset type of a compiled script module.
 pub const SCRIPT_ASSET_TYPE: u32 = 54;
 
+/// The asset type of a raw file (`rawfile`): configs, tables kept as text.
+pub const RAWFILE_ASSET_TYPE: u32 = 47;
+
+/// A raw file header: inline name, length, inline buffer.
+const RAWFILE_LEN: usize = 24;
+
 /// The asset type of a map's entities (`map_ents`).
 pub const MAP_ENTS_ASSET_TYPE: u32 = 15;
 
@@ -134,6 +140,66 @@ pub fn scripts<'a>(
         });
     }
     Ok(found)
+}
+
+/// A raw file and the name it is loaded by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RawFile<'a> {
+    pub name: &'a str,
+    pub bytes: &'a [u8],
+}
+
+/// The zone's raw files that carry their own name (a raw file may refer
+/// to its name elsewhere instead), and how many the asset list lists. Each
+/// sits in the stream as its header (inline name, length, inline buffer), its
+/// name, then its buffer and a terminating zero; compiled script modules share
+/// the shape and are left out by their magic.
+pub fn raw_files<'a>(content: &'a [u8], list: &AssetList) -> (Vec<RawFile<'a>>, usize) {
+    let listed = list
+        .asset_types
+        .iter()
+        .filter(|&&ty| ty == RAWFILE_ASSET_TYPE)
+        .count();
+    let mut found = Vec::new();
+    let mut at = list.data_at;
+    while at + RAWFILE_LEN <= content.len() {
+        let Some(offset) = find(&content[at..], &INLINE.to_le_bytes()) else {
+            break;
+        };
+        let header = at + offset;
+        at = header + 1;
+        if let Some(raw) = raw_file_at(content, header) {
+            at = header + RAWFILE_LEN + raw.name.len() + 1 + raw.bytes.len() + 1;
+            if !raw.bytes.starts_with(SCRIPT_MAGIC) {
+                found.push(raw);
+            }
+        }
+    }
+    (found, listed)
+}
+
+fn raw_file_at(content: &[u8], header: usize) -> Option<RawFile<'_>> {
+    if i64_at(content, header, "").ok()? != INLINE
+        || u32_at(content, header + 12, "").ok()? != 0
+        || i64_at(content, header + 16, "").ok()? != INLINE
+    {
+        return None;
+    }
+    let len = u32_at(content, header + 8, "").ok()? as usize;
+    let name_at = header + RAWFILE_LEN;
+    let name_len = content.get(name_at..)?.iter().position(|&b| b == 0)?;
+    let name = core::str::from_utf8(&content[name_at..name_at + name_len]).ok()?;
+    let plausible = !name.is_empty()
+        && name.contains('.')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_graphic() && b != b'"' && b != b'\\');
+    if !plausible {
+        return None;
+    }
+    let data_at = name_at + name_len + 1;
+    let bytes = content.get(data_at..data_at + len)?;
+    (content.get(data_at + len) == Some(&0)).then_some(RawFile { name, bytes })
 }
 
 /// A map's entities: the name it is loaded by (`maps/zm/zm_zod.d3dbsp`) and

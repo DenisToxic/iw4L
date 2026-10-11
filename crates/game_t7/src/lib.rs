@@ -1,3 +1,4 @@
+mod key_types;
 mod startup;
 
 use game_api::{HudRules, LibraryMode, ModeRules, Rule, ScriptProgram, ScriptRequest, unknown};
@@ -32,11 +33,19 @@ impl game_api::GameScripts for T7 {
         let mut entries = built.autoexec;
         entries.push(format!("{gametype}::main"));
         entries.push(format!("{map}::main"));
+        let settings = gametype_settings(request.config, ZOMBIES);
+        diag::info!(
+            Sim,
+            "t7 gametype settings: {} for {ZOMBIES}",
+            settings.len()
+        );
         Rule::Known(ScriptProgram {
             catalog: gsc::Catalog::from_list(asset_core::FamilyId::T7, &[]),
             roots,
             entries,
             built: Some(built.program),
+            settings,
+            key_types: entity_key_types(request.entities),
         })
     }
 
@@ -47,6 +56,60 @@ impl game_api::GameScripts for T7 {
     fn config_defaults(&self) -> &'static [(&'static str, &'static str)] {
         &[]
     }
+}
+
+/// The types of the keys the map's entities use, as Black Ops 3's
+/// executable lists them by the key's hash.
+fn entity_key_types(entities: &str) -> Vec<(String, game_api::KeyType)> {
+    let mut keys = std::collections::BTreeSet::new();
+    for line in entities.lines() {
+        let line = line.trim_start();
+        if let Some(rest) = line.strip_prefix('"')
+            && let Some(end) = rest.find('"')
+        {
+            keys.insert(rest[..end].to_ascii_lowercase());
+        }
+    }
+    keys.into_iter()
+        .filter_map(|key| {
+            let hash = gsc_t7::hash(&key);
+            key_types::KEY_TYPES
+                .binary_search_by_key(&hash, |&(known, _)| known)
+                .ok()
+                .map(|index| (key, key_types::KEY_TYPES[index].1))
+        })
+        .collect()
+}
+
+/// A zombies gametype's settings: `gamedata/gamesettings/zm/
+/// gamesettings_default.cfg`, then the gametype's own file over it. Each line
+/// is `gametype_setting <name> <value>`, `//` starting a comment.
+fn gametype_settings<'a>(
+    config: &dyn Fn(&str) -> Option<&'a str>,
+    gametype: &str,
+) -> Vec<(String, String)> {
+    let mut settings: Vec<(String, String)> = Vec::new();
+    for file in ["default", gametype] {
+        let Some(text) = config(&format!("gamedata/gamesettings/zm/gamesettings_{file}.cfg"))
+        else {
+            continue;
+        };
+        for line in text.lines() {
+            let line = line.split("//").next().unwrap_or("");
+            let mut words = line.split_whitespace();
+            let (Some("gametype_setting"), Some(name), Some(value)) =
+                (words.next(), words.next(), words.next())
+            else {
+                continue;
+            };
+            let name = name.to_ascii_lowercase();
+            match settings.iter_mut().find(|(set, _)| *set == name) {
+                Some((_, set)) => value.clone_into(set),
+                None => settings.push((name, value.to_owned())),
+            }
+        }
+    }
+    settings
 }
 
 impl game_api::GameVision for T7 {

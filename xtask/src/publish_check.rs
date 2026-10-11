@@ -50,6 +50,9 @@ const EXEMPT: &[&str] = &[
     // Generated table of Black Ops 3 script name hashes: 32-bit hashes, and
     // random ones fall in the address range this gate reads as an offset.
     "crates/gsc_t7/src/names.rs",
+    // Generated table of Black Ops 3's map key types, keyed by the same
+    // 32-bit name hashes.
+    "crates/game_t7/src/key_types.rs",
 ];
 
 fn stray_test(rel: &str, text: &str) -> Option<(usize, &'static str)> {

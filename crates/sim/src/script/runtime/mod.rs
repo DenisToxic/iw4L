@@ -10,7 +10,7 @@ use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub(crate) use lifecycle::{copy_state, install, install_level, reset, reset_round};
+pub(crate) use lifecycle::{CREATE_STRUCT, copy_state, install, install_level, reset, reset_round};
 pub(crate) use state::{MatchScript, RoundScript};
 
 /// Instructions one resumed thread may run before it is killed as a runaway loop.
