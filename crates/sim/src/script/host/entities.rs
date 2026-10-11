@@ -28,6 +28,8 @@ pub struct LevelData {
     pub entity_fields: Option<BTreeMap<String, KeyType>>,
     /// Layouts of bit-packed buffers (a player's stats), by name.
     pub layouts: BTreeMap<String, Arc<asset_core::BitLayout>>,
+    /// Zombies barrier types, by lowercase name.
+    pub barriers: BTreeMap<String, Arc<asset_core::BarrierType>>,
     pub schemas: BTreeMap<String, Arc<structured_data_iw4::DefinitionSet>>,
     pub player_data_defaults: Option<crate::PlayerDataDefaults>,
 }

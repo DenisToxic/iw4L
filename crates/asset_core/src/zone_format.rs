@@ -157,7 +157,44 @@ pub struct ZoneScripts {
     pub tables: Vec<ZoneTable>,
     /// Layouts of bit-packed buffers (a player's stats), by name.
     pub layouts: Vec<BitLayout>,
+    /// Zombies barrier types.
+    pub barriers: Vec<BarrierType>,
     pub report: Vec<String>,
+}
+
+/// A zombies barrier type: pieces that open and close by animation, and the
+/// zombie animation states it offers. Flags are the game's words.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarrierType {
+    pub name: String,
+    pub piece_count: i32,
+    pub auto_hide_open_pieces: u32,
+    pub taunts: u32,
+    pub reach_through_attacks: u32,
+    pub taunt_anim_state: String,
+    pub reach_through_anim_state: String,
+    pub attack_slots: i32,
+    pub attack_slot_horz_offset: f32,
+    pub pieces: Vec<BarrierPiece>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarrierPiece {
+    /// The default, alternate and upgraded models.
+    pub models: [Option<String>; 3],
+    /// The animations a piece plays opening and closing.
+    pub open_anim: Option<BarrierAnim>,
+    pub close_anim: Option<BarrierAnim>,
+    pub anim_state: String,
+    pub anim_substate: String,
+    pub upgraded_lives: u32,
+}
+
+/// An animation by name, with its frame count and rate when known.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BarrierAnim {
+    pub name: String,
+    pub timing: Option<(u16, f32)>,
 }
 
 /// A string table a zone carries: its name and cells, row by row.

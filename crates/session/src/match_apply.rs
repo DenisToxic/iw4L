@@ -1262,6 +1262,7 @@ fn preflight_match_install(
         keys,
         entity_fields: None,
         layouts: sources.0.layouts().clone(),
+        barriers: sources.0.barriers().clone(),
         tables: sources
             .0
             .tables()

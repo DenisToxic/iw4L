@@ -9,6 +9,8 @@ use crate::script::{ArrayKey, Namespace, NativeRegistry, RoundScript, Value};
 use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 
+mod barrier;
+
 /// How Black Ops 2 finds a dvar: djb2 over the lowercased name.
 fn dvar_hash(name: &str) -> u32 {
     name.bytes().fold(5381u32, |hash, byte| {
@@ -1680,6 +1682,7 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             registry.register(namespace, name, native);
         }
     }
+    barrier::register(registry);
 }
 
 /// The node field a node lookup key names; it has to hold a string.
