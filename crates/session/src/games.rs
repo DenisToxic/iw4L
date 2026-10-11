@@ -42,6 +42,12 @@ pub fn zone_formats() -> Vec<asset_core::ZoneFormat> {
     vec![fastfile_t7::ZONE_FORMAT]
 }
 
+/// Where games whose zones `asset_transport` opens keep the compiled scripts
+/// their maps run as they are.
+pub fn script_zone_formats() -> Vec<asset_core::ScriptZoneFormat> {
+    vec![game_t6::SCRIPT_ZONE_FORMAT]
+}
+
 /// The menu expression parser of each game whose menu catalogs tag their
 /// programs with the game (`asset_game`'s Black Ops catalog writes `t5`).
 pub fn menu_parsers() -> menu_expr::MenuParsers {
@@ -60,11 +66,12 @@ pub fn menus(family: FamilyId) -> &'static dyn game_api::GameMenus {
 }
 
 /// The natives the scripts of the game the map belongs to bind.
-pub(crate) fn natives(family: FamilyId) -> sim::script::NativeRegistry {
+pub(crate) fn natives(family: FamilyId, mode: &game_api::ModeRules) -> sim::script::NativeRegistry {
     let services = sim::script::NativeRegistry::engine_services;
     match family {
         FamilyId::Iw4 => services().with_mw2_systems(),
         FamilyId::T5 => services().with_black_ops(),
+        FamilyId::T6 if !mode.host_rules => sim::script::NativeRegistry::black_ops_2(),
         FamilyId::Iw5 | FamilyId::T6 => services(),
         FamilyId::T7 => sim::script::NativeRegistry::black_ops_3(),
     }

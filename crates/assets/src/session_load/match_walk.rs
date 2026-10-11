@@ -1508,5 +1508,6 @@ fn treyarch_map_under_iw4_rules(
 
     scripts.insert_source(&module, map_main);
     scripts.set_entities(entities);
+    scripts.keep_compiled(map_scripts);
     scripts
 }

@@ -41,7 +41,12 @@ pub struct ScriptRequest<'a> {
     pub entities: &'a str,
     /// A config file the map's zones carry (`gamedata/…/x.cfg`), by name.
     pub config: &'a dyn Fn(&str) -> Option<&'a str>,
+    /// A string table the map's zones carry, by name: its column count and cells.
+    pub table: &'a TableLookup<'a>,
 }
+
+/// A string table by name: its column count and cells, row by row.
+pub type TableLookup<'a> = dyn Fn(&str) -> Option<(usize, &'a [String])> + 'a;
 
 /// What a match compiles and where it starts.
 pub struct ScriptProgram {
@@ -56,6 +61,8 @@ pub struct ScriptProgram {
     /// The type a map entity key's value takes, by key; a key not listed
     /// stays as the runtime reads it otherwise.
     pub key_types: Vec<(String, KeyType)>,
+    /// Dvars the game sets for this match over the config and engine defaults.
+    pub dvars: Vec<(String, String)>,
 }
 
 /// The type of a map entity key's value.
@@ -119,6 +126,9 @@ pub struct ModeRules {
     pub binds_account: bool,
     /// Objective models, effects and weapons are bound for non-deathmatch modes.
     pub binds_objectives: bool,
+    /// Rules IW4L wrote for this game's mode run the match beside its
+    /// scripts (the game's ledger lists them).
+    pub host_rules: bool,
     pub hud: HudRules,
 }
 

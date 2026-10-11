@@ -18,7 +18,7 @@ pub use ident::{
 };
 pub use zone_format::{
     CollisionBox, CollisionBrush, CollisionLeaf, CollisionMaterial, CollisionModel, CollisionNode,
-    CollisionPartition, WorldCollision, WorldGeometry, WorldSurface, ZoneEntities, ZoneFormat,
-    ZoneScripts, ZoneWorld,
+    CollisionPartition, ScriptZoneFormat, WorldCollision, WorldGeometry, WorldSurface,
+    ZoneEntities, ZoneFormat, ZoneScripts, ZoneTable, ZoneWorld,
 };
 pub use zone_game::ZoneGame;
