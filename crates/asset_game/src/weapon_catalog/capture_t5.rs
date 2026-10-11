@@ -337,16 +337,17 @@ pub(super) fn f32_at_t5(
     stream.f32_at(body, off).unwrap_or(0.0)
 }
 
-pub(super) fn read_bounce_array_t5(
+/// The floats a definition's pointer field at `off` points at.
+pub(super) fn read_f32_array_t5<const N: usize>(
     stream: &fastfile_t5::ZoneStream<'_>,
     body: fastfile_t5::Ptr,
     off: usize,
-) -> Option<[f32; 31]> {
+) -> Option<[f32; N]> {
     let arr = match stream.ptr_at(body, off) {
         Ok(fastfile_t5::ZonePtr::Offset(q)) => stream.resolve_alias(q),
         _ => return None,
     };
-    let mut values = [0.0; 31];
+    let mut values = [0.0; N];
     for (i, value) in values.iter_mut().enumerate() {
         *value = stream.f32_at(arr, i * 4).ok()?;
     }
@@ -793,9 +794,9 @@ pub(super) fn capture_t5_body_facts(
     facts.cook_off_hold = u8_at_t5(stream, body, sz::WEAPON_DEF_COOK_OFF_HOLD_OFF) != 0;
     facts.offhand_hold_is_cancelable =
         Some(u8_at_t5(stream, body, sz::WEAPON_DEF_OFFHAND_HOLD_IS_CANCELABLE_OFF) != 0);
-    facts.parallel_bounce = read_bounce_array_t5(stream, body, sz::WEAPON_DEF_PARALLEL_BOUNCE_OFF);
+    facts.parallel_bounce = read_f32_array_t5(stream, body, sz::WEAPON_DEF_PARALLEL_BOUNCE_OFF);
     facts.perpendicular_bounce =
-        read_bounce_array_t5(stream, body, sz::WEAPON_DEF_PERPENDICULAR_BOUNCE_OFF);
+        read_f32_array_t5(stream, body, sz::WEAPON_DEF_PERPENDICULAR_BOUNCE_OFF);
     facts.fire_delay_ms = i32_at_t5(stream, body, sz::WEAPON_DEF_FIRE_DELAY_OFF);
     facts.quick_drop_time_ms = i32_at_t5(stream, body, sz::WEAPON_QUICK_DROP_TIME_OFF);
     facts.quick_raise_time_ms = i32_at_t5(stream, body, sz::WEAPON_QUICK_RAISE_TIME_OFF);
@@ -871,6 +872,11 @@ pub(super) fn capture_t5_body_facts(
                     .filter(|&slot| leftover_t5_cstr(stream, arr, slot * 4).is_some())
                     .fold(0u128, |bits, slot| bits | 1 << slot)
             }),
+            location_damage: read_f32_array_t5::<{ sz::WEAPON_LOCATION_DAMAGE_COUNT }>(
+                stream,
+                body,
+                sz::WEAPON_DEF_LOCATION_DAMAGE_OFF,
+            ),
         }))
     });
     (facts, game_bytes)

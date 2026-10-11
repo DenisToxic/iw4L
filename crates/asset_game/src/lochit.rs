@@ -1,7 +1,8 @@
 use weapon_iw4::{HITLOC_COUNT, HITLOC_NAMES, LOCATION_DAMAGE_IDENTITY, location_damage_is_valid};
 
 const LOCHIT_MAGIC: &str = "LOCDMGTABLE";
-const LOCHIT_RAWFILE: &str = "info/mp_lochit_dmgtable";
+/// Multiplayer's table, and Black Ops' singleplayer one its zombie maps use.
+const LOCHIT_RAWFILES: [&str; 2] = ["info/mp_lochit_dmgtable", "info/ai_lochit_dmgtable"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LochitTableError {
@@ -48,7 +49,7 @@ pub fn capture_lochit_table(
     data: &[u8],
     zlib_compressed: bool,
 ) -> Option<[f32; HITLOC_COUNT]> {
-    if name != LOCHIT_RAWFILE {
+    if !LOCHIT_RAWFILES.contains(&name) {
         return None;
     }
     let mut bytes = if zlib_compressed {

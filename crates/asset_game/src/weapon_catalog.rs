@@ -546,6 +546,8 @@ pub struct GameWeaponBytes {
     pub clip_name: String,
     /// The variant's animation slots that name an animation, by slot.
     pub named_anims: u128,
+    /// The definition's damage multipliers by hit location.
+    pub location_damage: Option<[f32; 19]>,
 }
 
 #[derive(Clone, Debug)]

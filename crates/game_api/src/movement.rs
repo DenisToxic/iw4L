@@ -198,6 +198,9 @@ pub struct GameWeapon {
     pub named_anims: u128,
     /// The weapon's name in its game.
     pub name: String,
+    /// The definition's damage multipliers by hit location, when it has its
+    /// own.
+    pub location_damage: Option<Box<[f32]>>,
 }
 
 /// The water over a point, as far as the match knows it.
@@ -297,6 +300,19 @@ pub trait PlayerMovement: Sync {
     fn has_perk(&self, player: &MovePlayer, perk: &str) -> bool;
 
     fn clear_perks(&self, player: &mut MovePlayer);
+
+    /// What the server does with the events a command raised: the shots
+    /// they fire. `before` is the player as the command found it, `player`
+    /// as it left it. Returns the parts the game reached that are not run.
+    fn server_events(
+        &self,
+        _before: &MovePlayer,
+        _player: &MovePlayer,
+        _signals: &[MoveSignal],
+        _world: &mut dyn crate::fire::FireWorld,
+    ) -> Vec<&'static Unknown> {
+        Vec::new()
+    }
 }
 
 /// Whose weapon rules run a match.
