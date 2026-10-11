@@ -43,6 +43,8 @@ impl game_api::GameScripts for T6 {
             roots: startup.roots,
             entries: startup.entries,
             built: None,
+            settings: Vec::new(),
+            key_types: Vec::new(),
         })
     }
 

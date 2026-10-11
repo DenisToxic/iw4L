@@ -10,6 +10,10 @@ use crate::script::{ArrayKey, Namespace, NativeRegistry, RoundScript, Value};
 use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 
+/// The gametype's settings, by lower-case name.
+#[derive(Resource, Default)]
+pub struct GametypeSettings(pub BTreeMap<String, String>);
+
 /// The client fields the scripts registered: pool and name → bits and type.
 #[derive(Resource, Default)]
 pub(crate) struct ClientFields(BTreeMap<(String, String), (i32, String)>);
@@ -121,7 +125,9 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     });
     registry.register(Function, "getlastarraykey", |world, _, args| {
         let values = array(world, arg(args, 0)?)?;
-        Ok(walk(&values).last().map_or(Value::Undefined, |(k, _)| key_value(k)))
+        Ok(walk(&values)
+            .last()
+            .map_or(Value::Undefined, |(k, _)| key_value(k)))
     });
     registry.register(Function, "getprevarraykey", |world, _, args| {
         let values = array(world, arg(args, 0)?)?;
@@ -284,6 +290,23 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Ok(Value::Undefined)
     });
 
+    // "Gets the value of a gametype setting": a whole number reads as an
+    // int, any other number as a float, the rest as a string.
+    registry.register(Function, "getgametypesetting", |world, _, args| {
+        let name = string(args, 0)?.to_ascii_lowercase();
+        let value = world
+            .get_resource::<GametypeSettings>()
+            .and_then(|settings| settings.0.get(&name).cloned())
+            .ok_or_else(|| format!("gametype setting {name} is in no gamesettings file"))?;
+        Ok(if let Ok(n) = value.parse::<i32>() {
+            Value::Int(n)
+        } else if let Ok(f) = value.parse::<f32>() {
+            Value::Float(f)
+        } else {
+            Value::String(value.into())
+        })
+    });
+
     // Math.
     registry.register(Function, "getminbitcountfornum", |_, _, args| {
         // "GetMinBitCountForNum( 15 ) returns 4".
@@ -361,7 +384,9 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             return Ok(Value::Int(min));
         }
         let span = (i64::from(max) - i64::from(min)) as u32;
-        Ok(Value::Int(min.wrapping_add((super::math::random(world) % span) as i32)))
+        Ok(Value::Int(
+            min.wrapping_add((super::math::random(world) % span) as i32),
+        ))
     });
     registry.register(Function, "randomfloat", |world, _, args| {
         Ok(Value::Float(unit(world) * float(args, 0)?))
@@ -371,7 +396,10 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         Ok(Value::Float(min + unit(world) * (max - min)))
     });
     registry.register(Function, "distance", |_, _, args| {
-        Ok(Value::Float(length(sub(vector(args, 0)?, vector(args, 1)?))))
+        Ok(Value::Float(length(sub(
+            vector(args, 0)?,
+            vector(args, 1)?,
+        ))))
     });
     registry.register(Function, "distancesquared", |_, _, args| {
         let d = sub(vector(args, 0)?, vector(args, 1)?);
@@ -414,7 +442,9 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     });
     registry.register(Function, "vectorlerp", |_, _, args| {
         let (a, b, t) = (vector(args, 0)?, vector(args, 1)?, float(args, 2)?);
-        Ok(Value::Vector(std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)))
+        Ok(Value::Vector(std::array::from_fn(|i| {
+            a[i] + (b[i] - a[i]) * t
+        })))
     });
 
     // Script errors: "throw a script error if this is false", "Throws a

@@ -103,6 +103,11 @@ impl ScriptSources {
         })
     }
 
+    /// A config whose text a zone carries as is.
+    pub(crate) fn capture_config(&mut self, name: &str, text: String) {
+        self.configs.insert(normalize(name), text);
+    }
+
     pub(crate) fn capture(&mut self, name: &str, data: &[u8], compressed: bool) {
         let name = normalize(name);
         if name.ends_with(".cfg")

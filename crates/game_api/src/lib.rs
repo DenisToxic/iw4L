@@ -38,6 +38,8 @@ pub struct ScriptRequest<'a> {
     pub gametype: &'a str,
     /// The map's entity string.
     pub entities: &'a str,
+    /// A config file the map's zones carry (`gamedata/…/x.cfg`), by name.
+    pub config: &'a dyn Fn(&str) -> Option<&'a str>,
 }
 
 /// What a match compiles and where it starts.
@@ -48,6 +50,20 @@ pub struct ScriptProgram {
     /// A program the game built itself (from compiled scripts); the roots are
     /// then only reported, not compiled.
     pub built: Option<gsc::Program>,
+    /// The gametype's settings (`GetGametypeSetting`), by name.
+    pub settings: Vec<(String, String)>,
+    /// The type a map entity key's value takes, by key; a key not listed
+    /// stays as the runtime reads it otherwise.
+    pub key_types: Vec<(String, KeyType)>,
+}
+
+/// The type of a map entity key's value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyType {
+    Int,
+    Float,
+    String,
+    Vector,
 }
 
 pub trait GameScripts: Sync {

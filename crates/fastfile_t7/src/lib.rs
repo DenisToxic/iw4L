@@ -4,8 +4,8 @@ mod envelope;
 mod world;
 
 pub use content::{
-    AssetList, ContentError, MAP_ENTS_ASSET_TYPE, MapEnts, SCRIPT_ASSET_TYPE, ScriptAsset,
-    asset_list, map_entities, scripts,
+    AssetList, ContentError, MAP_ENTS_ASSET_TYPE, MapEnts, RAWFILE_ASSET_TYPE, RawFile,
+    SCRIPT_ASSET_TYPE, ScriptAsset, asset_list, map_entities, raw_files, scripts,
 };
 
 pub use collision::{COL_MAP_ASSET_TYPE, CollisionError, world_collision};
@@ -110,6 +110,19 @@ fn zone_scripts(content: &[u8]) -> asset_core::ZoneScripts {
             return out;
         }
     };
+    let (raw, listed_raw) = raw_files(content, &list);
+    for file in &raw {
+        if file.name.ends_with(".cfg")
+            && let Ok(text) = core::str::from_utf8(file.bytes)
+        {
+            out.configs.push((file.name.to_owned(), text.to_owned()));
+        }
+    }
+    out.report.push(format!(
+        "t7 raw files: {} of {listed_raw} carry their name, {} configs",
+        raw.len(),
+        out.configs.len()
+    ));
     let found = match scripts(content, &list) {
         Ok(found) => found,
         Err(error) => {

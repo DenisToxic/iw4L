@@ -440,6 +440,7 @@ pub fn compile(
         symbol_ids: tables.symbol_ids,
         natives,
         rules: catalog.realm(),
+        field_name: None,
     })
 }
 

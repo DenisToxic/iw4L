@@ -32,6 +32,9 @@ pub struct Program {
     pub natives: Vec<Builtin>,
     pub rules: Realm,
     pub impure_scripts: bool,
+    /// How a map entity's key is named as a script field, for a game whose
+    /// scripts name fields by hash; `None` keeps the key as it is.
+    pub field_name: Option<fn(&str) -> String>,
 }
 impl Program {
     pub fn load(

@@ -302,6 +302,9 @@ impl ZoneLane for UnreadLane {
             for (name, bytes) in scripts.modules {
                 world.scripts.capture_compiled(&name, bytes);
             }
+            for (name, text) in scripts.configs {
+                world.scripts.capture_config(&name, text);
+            }
             world.report.push(format!("{zone}: {count} script modules"));
             world.report.extend(scripts.report);
         }

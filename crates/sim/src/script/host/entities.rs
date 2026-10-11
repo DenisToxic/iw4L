@@ -446,16 +446,24 @@ impl RoundScript {
         }
     }
 
+    /// Spawns the map's entities. Returns the `script_struct` objects the
+    /// game's own script takes in (Black Ops 3: `struct::CreateStruct`);
+    /// other games' structs go straight into `level.struct`.
     pub(crate) fn spawn_map_entities(
         &mut self,
         entities: &[Vec<(String, String)>],
         keys: &BTreeMap<String, KeyType>,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<u64>, String> {
         self.zombies.authored = Arc::new(entities.to_vec());
         let structs = match self.object_field(0, "struct") {
             Value::Array(id) => Some(id),
             _ => None,
         };
+        let program = self.program.as_ref();
+        let field_name = program.and_then(|p| p.field_name);
+        let hands_off_structs =
+            program.is_some_and(|p| p.names.contains_key(crate::script::runtime::CREATE_STRUCT));
+        let mut handed = Vec::new();
         let t5 = self
             .program
             .as_ref()
@@ -483,7 +491,11 @@ impl RoundScript {
             if classname.is_empty() || classname.starts_with("node_") {
                 continue;
             }
-            let id = if classname == "script_struct" {
+            let id = if classname == "script_struct" && hands_off_structs {
+                let id = self.new_object()?;
+                handed.push(id);
+                id
+            } else if classname == "script_struct" {
                 let Some(array) = structs else {
                     continue;
                 };
@@ -499,18 +511,33 @@ impl RoundScript {
             let mut height = None;
             let mut cmodel = None;
             let mut trigger_model = None;
+            let field = |key: &str| field_name.map_or_else(|| key.to_owned(), |name| name(key));
             for (key, value) in pairs {
                 let key = key.to_ascii_lowercase();
                 if key == "model" {
                     cmodel = value.strip_prefix('*').and_then(|n| n.parse::<u32>().ok());
                     trigger_model = value.strip_prefix('?').and_then(|n| n.parse::<u32>().ok());
                 }
+                // A game that names fields by hash lists its keys' types
+                // itself (Black Ops 3's executable); they come first.
+                let listed = keys.get(&key).filter(|_| field_name.is_some());
                 let value = match key.as_str() {
+                    _ if let Some(ty) = listed => {
+                        let typed = typed_key(*ty, value);
+                        match (key.as_str(), &typed) {
+                            ("radius", Value::Int(n)) => radius = Some(*n as f32),
+                            ("radius", Value::Float(n)) => radius = Some(*n),
+                            ("height", Value::Int(n)) => height = Some(*n as f32),
+                            ("height", Value::Float(n)) => height = Some(*n),
+                            _ => {}
+                        }
+                        typed
+                    }
                     "origin" | "angles" => Value::Vector(vector(value)),
                     "angle" => {
                         self.set_object_field(
                             id,
-                            "angles",
+                            &field("angles"),
                             Value::Vector([0.0, super::natives::iw4::atof(value) as f32, 0.0]),
                         );
                         continue;
@@ -528,17 +555,13 @@ impl RoundScript {
                         }
                         Value::Float(number)
                     }
-                    "classname" if classname == "script_struct" => continue,
+                    "classname" if classname == "script_struct" && !hands_off_structs => continue,
                     _ => match keys.get(&key) {
-                        Some(KeyType::Int) => Value::Int(super::natives::iw4::atoi(value)),
-                        Some(KeyType::Float) => {
-                            Value::Float(super::natives::iw4::atof(value) as f32)
-                        }
-                        Some(KeyType::Vector) => Value::Vector(vector(value)),
-                        Some(KeyType::String) | None => Value::string(value),
+                        Some(ty) => typed_key(*ty, value),
+                        None => Value::string(value),
                     },
                 };
-                self.set_object_field(id, &key, value);
+                self.set_object_field(id, &field(&key), value);
             }
             if let Some(entity) = self.entities.get_mut(&id) {
                 if classname == "trigger_radius" {
@@ -554,9 +577,18 @@ impl RoundScript {
                 }
             }
         }
-        Ok(())
+        Ok(handed)
     }
 }
 
 pub(crate) const MAX_SCRIPT_ENTITIES: usize = 2048 - 64;
 pub(crate) const MAX_HUD_ELEMS: usize = 1024;
+
+fn typed_key(ty: KeyType, value: &str) -> Value {
+    match ty {
+        KeyType::Int => Value::Int(super::natives::iw4::atoi(value)),
+        KeyType::Float => Value::Float(super::natives::iw4::atof(value) as f32),
+        KeyType::Vector => Value::Vector(vector(value)),
+        KeyType::String => Value::string(value),
+    }
+}

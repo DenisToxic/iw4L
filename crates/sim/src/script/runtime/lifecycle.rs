@@ -12,6 +12,9 @@ use super::{INSTRUCTION_BUDGET, execute, new_thread};
 
 /// Runs during install, before the map's `script_struct` blocks are appended to `level.struct`.
 pub const STRUCT_INIT: &str = "codescripts/struct::initstructs";
+/// Black Ops 3's engine hands each map `script_struct` to this function
+/// (`struct::CreateStruct`, hash 0x4c6908e2; its executable looks the hash up).
+pub const CREATE_STRUCT: &str = "scripts/codescripts/struct::#4c6908e2";
 
 pub(crate) fn copy_state(source: &World, target: &mut World) {
     target.insert_resource(source.resource::<RoundScript>().clone());
@@ -135,10 +138,36 @@ pub(crate) fn install_level(
     let entities = plan.entities.clone();
     let keys = plan.keys.clone();
     world.resource_mut::<RoundScript>().restart = Some(Arc::new(plan));
-    world
+    let handed = world
         .resource_mut::<RoundScript>()
         .spawn_map_entities(&entities, &keys)
         .map_err(|m| Fault::at(&location, m))?;
+    if let Some(&function) = program.names.get(CREATE_STRUCT) {
+        for id in handed {
+            let mut thread = new_thread(
+                world,
+                &program,
+                function,
+                Value::Object(0),
+                vec![Value::Object(id)],
+            )
+            .map_err(|m| Fault::at(&location, m))?;
+            world.resource_mut::<RoundScript>().budget = INSTRUCTION_BUDGET;
+            thread.state = ThreadState::Runnable;
+            execute(world, &program, &mut thread, 0);
+            let runtime = world.resource::<RoundScript>();
+            if let Some(fault) = runtime.fault.clone() {
+                return Err(fault);
+            }
+            if thread.state != ThreadState::Complete {
+                return Err(Fault::at(
+                    &location,
+                    format!("{CREATE_STRUCT} must not wait"),
+                ));
+            }
+        }
+        world.resource_mut::<RoundScript>().started = false;
+    }
     host::presence::initialize_map_models(world);
     Ok(())
 }

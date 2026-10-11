@@ -15,6 +15,27 @@ fn display(hash: u32) -> String {
     name_of(hash).map_or_else(|| format!("#{hash:08x}"), str::to_owned)
 }
 
+/// The 32-bit FNV prime, as FNV defines it.
+const FNV_PRIME: u32 = (1 << 24) + (1 << 8) + 0x93;
+
+/// Black Ops 3's name hash: 32-bit FNV-1a from 0x4b9ace2f over the lower-case
+/// name and its terminating zero (checked against Treyarch's compiler in the
+/// Mod Tools: `createstruct` 0x4c6908e2, `targetname` 0x170527fb).
+pub fn hash(name: &str) -> u32 {
+    name.bytes()
+        .map(|b| b.to_ascii_lowercase())
+        .chain([0])
+        .fold(0x4b9a_ce2f, |h: u32, b| {
+            (h ^ u32::from(b)).wrapping_mul(FNV_PRIME)
+        })
+}
+
+/// The field a map entity's key becomes: the name the scripts' hash stands
+/// for, as the translated scripts spell it.
+pub fn field_name(key: &str) -> String {
+    display(hash(key))
+}
+
 /// One compiled module to load: its name (`scripts/zm/zm_zod`), bytes and origin.
 pub struct Source {
     pub name: String,
@@ -212,6 +233,7 @@ pub fn build(sources: &[Source], realm: Realm) -> Built {
             symbol_ids: linker.symbol_ids,
             natives: linker.natives,
             rules: realm,
+            field_name: Some(field_name),
         },
         autoexec,
         report,

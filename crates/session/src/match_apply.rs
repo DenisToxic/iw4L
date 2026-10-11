@@ -252,6 +252,7 @@ pub fn apply_prepared_match(
             actor_anim_sources,
             script_level,
             script_entries,
+            gametype_settings,
             script_dvars,
             account_defaults,
             script_sound_aliases,
@@ -668,6 +669,7 @@ pub fn apply_prepared_match(
         for (name, value) in &script_dvars {
             sim.set_gsc_dvar(name, value);
         }
+        sim.set_gametype_settings(gametype_settings);
         for entry in script_entries {
             sim.start_gsc(&entry, sim::script::Value::level(), Vec::new())
                 .map_err(|e| script_refusal(&zone, gametype, "entry", &e))?;
@@ -868,6 +870,8 @@ struct MatchInstallPlan {
     actor_anim_sources: Vec<(String, String)>,
     script_level: sim::script::LevelData,
     script_entries: Vec<String>,
+    /// The gametype's settings (`GetGametypeSetting`).
+    gametype_settings: Vec<(String, String)>,
     script_dvars: Vec<(String, String)>,
     account_defaults: Option<sim::PlayerDataDefaults>,
     script_sound_aliases: Option<std::collections::BTreeMap<String, Option<bool>>>,
@@ -1279,10 +1283,12 @@ fn preflight_match_install(
         );
     }
     let game_scripts = crate::games::scripts(family);
+    let config = |name: &str| sources.0.config(name);
     let request = game_api::ScriptRequest {
         map: zone,
         gametype,
         entities: sources.0.entities().unwrap_or(""),
+        config: &config,
     };
     let program = match game_scripts.program(&request, &sources) {
         game_api::Rule::Known(program) => program,
@@ -1354,6 +1360,22 @@ fn preflight_match_install(
     }
     script_dvars.extend(script_dvar_overrides());
     let script_entries = program.entries;
+    let gametype_settings = program.settings;
+    if !program.key_types.is_empty() {
+        script_level.keys = program
+            .key_types
+            .into_iter()
+            .map(|(key, ty)| {
+                let ty = match ty {
+                    game_api::KeyType::Int => sim::script::KeyType::Int,
+                    game_api::KeyType::Float => sim::script::KeyType::Float,
+                    game_api::KeyType::String => sim::script::KeyType::String,
+                    game_api::KeyType::Vector => sim::script::KeyType::Vector,
+                };
+                (key, ty)
+            })
+            .collect();
+    }
     let actor_anim_sources: Vec<(String, String)> = if is_zombies {
         sources
             .0
@@ -1409,6 +1431,7 @@ fn preflight_match_install(
         actor_anim_sources,
         script_level,
         script_entries,
+        gametype_settings,
         script_dvars,
         account_defaults,
         objective_weapons,
