@@ -1486,6 +1486,18 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         int(args, 1)?;
         Ok(Value::Undefined)
     });
+    // The reviver goes in the online match record only.
+    registry.register(
+        Method,
+        "recordplayerrevivezombies",
+        |world, receiver, args| {
+            client_of(world, receiver)?;
+            super::engine::entity_id(world, arg(args, 0)?)?;
+            Ok(Value::Undefined)
+        },
+    );
+    // Its handler is empty.
+    registry.register(Function, "getplayerspawnid", |_, _, _| Ok(Value::Undefined));
 
     registry.register(Function, "playsoundatposition", |world, _, args| {
         let origin = vector(args, 1)?;
