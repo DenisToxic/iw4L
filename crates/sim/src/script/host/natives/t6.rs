@@ -10,6 +10,10 @@ use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
 
 mod barrier;
+mod effect;
+mod mover;
+mod sound;
+mod weapon;
 
 /// How Black Ops 2 finds a dvar: djb2 over the lowercased name.
 fn dvar_hash(name: &str) -> u32 {
@@ -352,16 +356,6 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             return Err("Shader name string is empty".into());
         }
         super::iw4::precache(world, "shader", name)?;
-        Ok(Value::Undefined)
-    });
-    registry.register(Function, "precacheitem", |world, _, args| {
-        if !world.resource::<RoundScript>().loading {
-            return Err("precacheItem must be called before any wait statements in the gametype or level script\n".into());
-        }
-        let name = string(args, 0)?;
-        crate::frame::FrameWorld::from_world(world)
-            .weapon_index_by_script_name(&name)
-            .ok_or_else(|| format!("unknown weapon '{name}'"))?;
         Ok(Value::Undefined)
     });
     // Status icons and menus each fill a fixed run of config strings; a
@@ -1214,9 +1208,11 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
     });
     registry.register(Method, "useweaponhidetags", |world, receiver, args| {
         let name = string(args, 0)?;
-        crate::frame::FrameWorld::from_world(world)
-            .weapon_index_by_script_name(&name)
-            .ok_or_else(|| format!("useweaponhidetags called with unknown weapon name {name}\n"))?;
+        if weapon::weapon_index(world, &name)? == 0 {
+            return Err(format!(
+                "useweaponhidetags called with unknown weapon name {name}\n"
+            ));
+        }
         let id = super::engine::entity_id(world, receiver)?;
         world
             .get_resource_or_insert_with(EntityFlags::default)
@@ -1490,6 +1486,18 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         int(args, 1)?;
         Ok(Value::Undefined)
     });
+    // The reviver goes in the online match record only.
+    registry.register(
+        Method,
+        "recordplayerrevivezombies",
+        |world, receiver, args| {
+            client_of(world, receiver)?;
+            super::engine::entity_id(world, arg(args, 0)?)?;
+            Ok(Value::Undefined)
+        },
+    );
+    // Its handler is empty.
+    registry.register(Function, "getplayerspawnid", |_, _, _| Ok(Value::Undefined));
 
     registry.register(Function, "playsoundatposition", |world, _, args| {
         let origin = vector(args, 1)?;
@@ -1683,6 +1691,10 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         }
     }
     barrier::register(registry);
+    weapon::register_natives(registry);
+    effect::register(registry);
+    mover::register(registry);
+    sound::register(registry);
 }
 
 /// The node field a node lookup key names; it has to hold a string.
