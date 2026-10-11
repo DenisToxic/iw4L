@@ -2,7 +2,7 @@
 //! its own shot (spread, bullets, penetration, damage) and the match traces
 //! and applies it through [`FireWorld`].
 
-use crate::movement::GameWeapon;
+use crate::movement::{GameWeapon, MovePlayer};
 
 /// What a bullet trace ran into, in the game's trace terms.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -23,6 +23,8 @@ pub struct BulletTrace {
     pub normal: [f32; 3],
     /// The surface's flags, the surface type among them, in the game's bits.
     pub surface_flags: u32,
+    /// The contents of what it hit, in the game's bits.
+    pub contents: u32,
     pub hit: BulletHitType,
     /// The hit location the trace reports, in the game's numbering (0 none).
     pub hit_location: i32,
@@ -48,10 +50,25 @@ pub enum FireEntityKind {
     Other,
 }
 
-/// An entity a shot reaches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An entity a shot or blast reaches.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FireEntity {
     pub kind: FireEntityKind,
+    pub origin: [f32; 3],
+    pub angles: [f32; 3],
+    /// What it is solid to, in the game's bits.
+    pub contents: u32,
+    /// Its linked bounds in the world, as the engine links it (sentients
+    /// are linked one unit wider); `None` when it is not linked by bounds.
+    pub bounds: Option<([f32; 3], [f32; 3])>,
+    /// A brush model's own bounds, in its model space.
+    pub model_bounds: Option<([f32; 3], [f32; 3])>,
+    /// An actor's eye.
+    pub eye: Option<[f32; 3]>,
+    /// A script model: a blast reaches it by its model's bounds.
+    pub script_model: bool,
+    /// It has its own blast damage rule (a destructible).
+    pub blast_handler: bool,
     pub takes_damage: bool,
     pub health: i32,
     pub team: Option<FireTeam>,
@@ -80,8 +97,9 @@ pub struct FireDamage {
     /// The means of death, by its script name.
     pub means: &'static str,
     pub weapon: u32,
-    /// The hit location, by its script name.
+    /// The hit location, by its script name and its number.
     pub hit_location: &'static str,
+    pub location: i32,
     pub bone: Option<u16>,
 }
 
@@ -112,6 +130,10 @@ pub trait FireWorld {
 
     /// A dvar's value; `None` when the match does not keep it.
     fn dvar(&self, name: &str) -> Option<String>;
+
+    /// The server's shared random draw, 0 to 32767: the C library's
+    /// generator over the match's state.
+    fn rand(&mut self) -> i32;
 
     fn weapon(&self, weapon: u32) -> Option<&GameWeapon>;
 
@@ -150,6 +172,130 @@ pub trait FireWorld {
 
     fn impact(&mut self, impact: &BulletImpact);
 
-    /// Notifies `name` on an entity, with the weapon's name when given.
-    fn notify(&mut self, entity: i32, name: &str, weapon: Option<u32>);
+    /// The entities whose bounds touch the box.
+    fn entities_in_box(&mut self, mins: [f32; 3], maxs: [f32; 3]) -> Vec<i32>;
+
+    /// True when a sight trace from `start` to `end` through what `mask`
+    /// names reaches it, passing through the two entities.
+    fn sight_clear(&mut self, start: [f32; 3], end: [f32; 3], pass: [i32; 2], mask: u32) -> bool;
+
+    /// A player, as its movement keeps it.
+    fn player(&self, entity: i32) -> Option<MovePlayer>;
+
+    /// A script asked that script blasts pass players by.
+    fn players_ignore_radius_damage(&self) -> bool;
+
+    /// Puts a game missile in the match; returns its entity number, or
+    /// `None` when the match has no room for it.
+    fn spawn_missile(&mut self, missile: GameMissile) -> Option<i32>;
+
+    /// Adds to a player's velocity.
+    fn push_player(&mut self, entity: i32, velocity: [f32; 3]);
+
+    /// A missile's explosion, as the clients show it.
+    fn explosion(&mut self, explosion: &MissileExplosion);
+
+    /// Notifies `name` on an entity with these arguments.
+    fn notify(&mut self, entity: i32, name: &str, args: &[NotifyArg]);
+
+    /// The map's centre a script set; missiles too far from it are gone.
+    fn map_center(&self) -> [f32; 3];
+
+    /// The contents at a point, of the world and the entities there.
+    fn point_contents(&mut self, point: [f32; 3], mask: u32) -> u32;
+}
+
+/// A blast: damage falling off with distance from its origin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RadiusDamage {
+    pub origin: [f32; 3],
+    pub inflictor: i32,
+    pub attacker: i32,
+    /// Damage at the origin and at the edge.
+    pub inner: f32,
+    pub outer: f32,
+    pub radius: f32,
+    /// Only what lies within this cone (cosine, direction).
+    pub cone: Option<(f32, [f32; 3])>,
+    /// The entity the blast passes by.
+    pub ignore: i32,
+    /// The means of death, by its script name.
+    pub means: &'static str,
+    pub weapon: u32,
+    /// The blast comes from a script's RadiusDamage.
+    pub script: bool,
+}
+
+/// How a trajectory moves.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TrajectoryKind {
+    #[default]
+    Stationary,
+    Linear,
+    /// Falling at this many units per second squared.
+    Gravity(f32),
+}
+
+/// A position (or angles) over time: from `base` at `time`, moving by
+/// `delta` per second as `kind` says.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GameTrajectory {
+    pub kind: TrajectoryKind,
+    pub time: i32,
+    pub duration: i32,
+    pub base: [f32; 3],
+    pub delta: [f32; 3],
+}
+
+/// Bytes a game keeps per missile beyond the shared fields.
+pub const GAME_MISSILE_BYTES: usize = 64;
+
+/// A missile the game's rules move and explode; the match keeps it, shows
+/// it and runs it every frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameMissile {
+    /// Its entity number; set by the match when it spawns.
+    pub entity: i32,
+    /// The player that fired it.
+    pub owner: i32,
+    pub weapon: u32,
+    pub position: GameTrajectory,
+    pub angles: GameTrajectory,
+    /// Where it is now.
+    pub origin: [f32; 3],
+    /// Clients draw it from this time on.
+    pub visible_at: i32,
+    pub game: [u8; GAME_MISSILE_BYTES],
+}
+
+/// What a missile's frame did.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MissileRun {
+    Flying,
+    /// It exploded here (the match tells scripts) and is gone.
+    Exploded([f32; 3]),
+    /// It is gone without an explosion scripts hear of.
+    Gone,
+}
+
+/// A missile's explosion effect.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MissileExplosion {
+    pub missile: i32,
+    pub owner: i32,
+    pub weapon: u32,
+    pub origin: [f32; 3],
+    pub normal: [f32; 3],
+    pub surface_type: u8,
+}
+
+/// An argument a game's notify passes to scripts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum NotifyArg {
+    /// A weapon, by its script name.
+    Weapon(u32),
+    Entity(i32),
+    Vector([f32; 3]),
+    Float(f32),
+    Int(i32),
 }

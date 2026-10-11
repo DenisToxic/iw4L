@@ -30,7 +30,7 @@ pub use query::{
     SightSample, TraceBudget, WalkSample, WorldQuery,
 };
 pub use roster::{
-    BotAddQueue, BotAddRequest, BotFireQueue, BotHold, BotRoster, BotSide, BotTpQueue,
+    BotAddQueue, BotAddRequest, BotFireQueue, BotHold, BotPress, BotRoster, BotSide, BotTpQueue,
     BotTpRequest, BotTpTarget, BotTpWhere, MAX_HOST_BOTS,
 };
 pub use sensor::{observe, observe_focused};

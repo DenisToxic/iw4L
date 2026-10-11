@@ -313,6 +313,25 @@ pub trait PlayerMovement: Sync {
     ) -> Vec<&'static Unknown> {
         Vec::new()
     }
+
+    /// A blast by the game's own rules; `None` when the game has none and
+    /// the match applies its own.
+    fn radius_damage(
+        &self,
+        _blast: &crate::fire::RadiusDamage,
+        _world: &mut dyn crate::fire::FireWorld,
+    ) -> Option<Vec<&'static Unknown>> {
+        None
+    }
+
+    /// One frame of a missile the game spawned.
+    fn run_missile(
+        &self,
+        _missile: &mut crate::fire::GameMissile,
+        _world: &mut dyn crate::fire::FireWorld,
+    ) -> (crate::fire::MissileRun, Vec<&'static Unknown>) {
+        (crate::fire::MissileRun::Gone, Vec::new())
+    }
 }
 
 /// Whose weapon rules run a match.

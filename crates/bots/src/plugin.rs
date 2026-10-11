@@ -6,12 +6,13 @@ use net::{
     AUTHORITY_MS, AuthorityClock, AuthorityWorld, ClientActionInbox, ClientCommandInbox,
     LocalPresentClient, ReliableEventHub, authority_should_tick, look_angles_from_degrees,
 };
+use playerstate_iw4::buttons;
 use sim::{ClientAction, ClientLifecycle, SimWorld, Tick};
 
 use crate::nav::{self, NAV_HULL, NAV_SCHEMA, NavGraph, RouteStats};
 use crate::query::{Budgeted, QueryCounters, QuerySubsystem, TraceBudget};
 use crate::roster::{
-    BotAddQueue, BotFireQueue, BotHold, BotRoster, BotTpQueue, BotTpTarget, BotTpWhere,
+    BotAddQueue, BotFireQueue, BotHold, BotPress, BotRoster, BotTpQueue, BotTpTarget, BotTpWhere,
     default_class_index,
 };
 use crate::sensor;
@@ -530,11 +531,16 @@ fn think_bots(mut p: ThinkBots) {
         } else {
             continue;
         };
-        if fires.iter().any(|target| match target {
-            BotTpTarget::All => true,
-            BotTpTarget::Id(id) => *id == bot.id,
-        }) {
-            cmd.buttons |= playerstate_iw4::buttons::ATTACK;
+        for (target, press) in &fires {
+            if match target {
+                BotTpTarget::All => true,
+                BotTpTarget::Id(id) => *id == bot.id,
+            } {
+                cmd.buttons |= match press {
+                    BotPress::Attack => buttons::ATTACK,
+                    BotPress::Melee => buttons::MELEE_CHARGE,
+                };
+            }
         }
         p.cmds.push(bot.id, None, cmd, None);
     }

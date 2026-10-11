@@ -6,6 +6,7 @@
 use fastfile_t5::weapon_def::WeaponDefView;
 use game_api::fire::{
     BulletHitType, BulletImpact, BulletTrace, FireDamage, FireEntity, FireEntityKind, FireWorld,
+    NotifyArg,
 };
 use game_api::movement::{ENTITY_NONE, ENTITY_WORLD, MoveSignal};
 use game_api::{Unknown, unknown};
@@ -33,7 +34,7 @@ mod dflags {
 }
 
 /// The means of death, by number.
-const MEANS: [&str; 21] = [
+pub(crate) const MEANS: [&str; 21] = [
     "MOD_UNKNOWN",
     "MOD_PISTOL_BULLET",
     "MOD_RIFLE_BULLET",
@@ -59,6 +60,7 @@ const MEANS: [&str; 21] = [
 const MOD_PISTOL_BULLET: usize = 1;
 const MOD_RIFLE_BULLET: usize = 2;
 const MOD_MELEE: usize = 7;
+const MOD_FALLING: usize = 12;
 
 /// Hit locations, by number.
 const HIT_LOCATIONS: [&str; 19] = [
@@ -85,6 +87,10 @@ const HIT_LOCATIONS: [&str; 19] = [
 
 /// `weaponType`: a weapon that fires bullets.
 const WEAPTYPE_BULLET: i32 = 0;
+/// `weaponType`: a projectile weapon.
+const WEAPTYPE_PROJECTILE: i32 = 2;
+/// `weaponClass` of a projectile weapon that launches grenades.
+const WEAPCLASS_GRENADE_LAUNCHER: i32 = 5;
 /// `weaponClass`: a spread weapon, its pellets out to its own range.
 const WEAPCLASS_SPREAD: i32 = 3;
 /// `fireType`: stacked barrels fired together.
@@ -94,19 +100,45 @@ const PERK_DEADSHOT: u32 = movement_t5::perks::DEADSHOT;
 /// `pm_flags` of a player on a turret or in a vehicle; the server fires
 /// that, not the player.
 const PMF_MOUNTED_FIRE: u32 = 0x4300;
+/// `pm_flags` of a player on a turret or in a vehicle, for melee.
+const PMF_MOUNTED_MELEE: u32 = 0x300;
+/// What a melee blow stops at.
+const MELEE_MASK: u32 = 0x0280_e091;
+/// A melee blow's traces, by their offsets across the blow's width and
+/// height; one trace when the blow has neither.
+const MELEE_OFFSETS: [(f32, f32); 9] = [
+    (0.0, 0.0),
+    (0.5, 0.0),
+    (-0.5, 0.0),
+    (0.0, 0.5),
+    (0.0, -0.5),
+    (1.0, 1.0),
+    (-1.0, 1.0),
+    (1.0, -1.0),
+    (-1.0, -1.0),
+];
+const MOD_BAYONET: usize = 8;
 /// The most surfaces a bullet that does not penetrate passes through.
 const BULLET_EXTENDED_SEGMENTS: i32 = 12;
 /// The eye heights hip spread blends between: prone to crouched, then
 /// crouched to standing.
 const PRONE_EYE: f32 = 11.0;
 const CROUCH_EYE: f32 = 40.0;
-const DEG2RAD: f32 = 0.0174532924;
+pub(crate) const DEG2RAD: f32 = 0.0174532924;
 
 pub(crate) fn fire_unknown() -> &'static Unknown {
     unknown!(
         "t5.weapons.fire",
-        "Black Ops' melee hits, thrown and fired grenades, projectiles, detonation and grenade suicide are not run",
-        "Black Ops' server melee, offhand throw, grenade, rocket and detonate rules from its executable"
+        "Black Ops' thrown and fired grenades, projectiles, detonation and grenade suicide are not run",
+        "Black Ops' server offhand throw, grenade, rocket and detonate rules from its executable"
+    )
+}
+
+fn melee_events_unknown() -> &'static Unknown {
+    unknown!(
+        "t5.weapons.melee_events",
+        "a melee blow's hit event (its sound and effect on what it struck) is not sent",
+        "Black Ops' melee hit events in the runtime's event stream"
     )
 }
 
@@ -211,7 +243,17 @@ pub(crate) fn server_events(
                 };
                 shot.fire_weapon(time, parm, world);
             }
-            ev::FIRE_MELEE | ev::USE_OFFHAND | ev::DETONATE | ev::GRENADE_SUICIDE => {
+            ev::FIRE_MELEE => {
+                let shot = Shot {
+                    ps,
+                    aim_spread_before,
+                    view_before,
+                    zombies,
+                    gaps: &mut gaps,
+                };
+                shot.melee(world);
+            }
+            ev::USE_OFFHAND | ev::DETONATE | ev::GRENADE_SUICIDE => {
                 gaps.push(fire_unknown());
             }
             _ => {}
@@ -361,6 +403,20 @@ struct BulletParams {
     kills: i32,
 }
 
+/// What a shot or blow does to one entity, before the server's damage
+/// rules.
+pub(crate) struct Hit {
+    pub(crate) target: i32,
+    pub(crate) dir: [f32; 3],
+    pub(crate) point: [f32; 3],
+    pub(crate) amount: i32,
+    pub(crate) flags: i32,
+    pub(crate) means: usize,
+    pub(crate) weapon: u32,
+    pub(crate) location: i32,
+    pub(crate) bone: Option<u16>,
+}
+
 /// One bullet trace and what it hit.
 #[derive(Clone, Copy, Default)]
 struct BulletResults {
@@ -399,7 +455,11 @@ impl Shot<'_> {
             return;
         }
         let weapon = self.ps.weapon;
-        world.notify(self.attacker(), "weapon_fired", Some(weapon));
+        world.notify(
+            self.attacker(),
+            "weapon_fired",
+            &[NotifyArg::Weapon(weapon)],
+        );
         // The shot's own copy: the world is traced and damaged while the
         // definition is read.
         let Some((def_bytes, variant_bytes)) = world
@@ -422,6 +482,20 @@ impl Shot<'_> {
         let spread = (max - min) * aim_frac + min;
         match def.weapon_type() {
             WEAPTYPE_BULLET => self.bullet_fire(&def, weapon, spread, &parms, time, world),
+            WEAPTYPE_PROJECTILE if def.weapon_class() != WEAPCLASS_GRENADE_LAUNCHER => {
+                crate::missile::fire_rocket(
+                    self.attacker(),
+                    weapon,
+                    &def,
+                    spread,
+                    parms.forward,
+                    parms.right,
+                    parms.up,
+                    parms.muzzle,
+                    world,
+                    self.gaps,
+                );
+            }
             _ => self.gaps.push(fire_unknown()),
         }
     }
@@ -441,7 +515,7 @@ impl Shot<'_> {
         }
         let (forward, right, up) = movement_t5::math::angle_vectors(angles);
         let muzzle = mad(
-            self.view_origin(),
+            view_origin(self.ps),
             forward,
             dvar(world, "bg_gunXOffset", 0.0f32),
         );
@@ -451,20 +525,6 @@ impl Shot<'_> {
             up,
             muzzle,
         }
-    }
-
-    /// The player's eye: origin, eye height and lean.
-    fn view_origin(&self) -> [f32; 3] {
-        let ps = self.ps;
-        let mut eye = ps.origin;
-        eye[2] += ps.view_height_current;
-        if ps.leanf != 0.0 {
-            let frac = (2.0 - ps.leanf.abs()) * ps.leanf;
-            let roll = frac * 16.0;
-            let (_, right, _) = movement_t5::math::angle_vectors([0.0, ps.viewangles[1], roll]);
-            eye = mad(eye, right, frac * 20.0);
-        }
-        eye
     }
 
     /// The hip spread at the player's eye height, and what overrides it.
@@ -795,16 +855,23 @@ impl Shot<'_> {
             if location == 1 || location == 2 {
                 out_flags |= 1;
             }
-            self.damage(
-                hit,
+            let attacker = self.attacker();
+            self::damage(
+                self.gaps,
+                attacker,
+                attacker,
                 entity,
-                bp,
-                br.hit_pos,
-                damage,
-                damage_flags,
-                weapon,
-                location,
-                br.trace.bone,
+                Hit {
+                    target: hit,
+                    dir: bp.dir,
+                    point: br.hit_pos,
+                    amount: damage,
+                    flags: damage_flags,
+                    means: bp.means,
+                    weapon,
+                    location,
+                    bone: br.trace.bone,
+                },
                 world,
             );
             let alive = world.entity(hit).is_some_and(|e| e.health > 0);
@@ -822,7 +889,7 @@ impl Shot<'_> {
                         self.gaps.push(achievement_unknown());
                     }
                     if bp.kills >= dvar(world, "bullet_multikill_shots", 2i32) {
-                        world.notify(attacker, "multikill", None);
+                        world.notify(attacker, "multikill", &[]);
                     }
                 }
             }
@@ -873,89 +940,306 @@ impl Shot<'_> {
         });
     }
 
-    /// The server's damage to what a player's bullet hits.
-    #[allow(clippy::too_many_arguments)]
-    fn damage(
-        &mut self,
-        target: i32,
-        entity: FireEntity,
-        bp: &BulletParams,
-        point: [f32; 3],
-        mut amount: i32,
-        flags: i32,
-        weapon: u32,
-        location: i32,
-        bone: Option<u16>,
-        world: &mut dyn FireWorld,
-    ) {
+    /// A melee blow: the weapon that strikes (a bayonet or a weapon used as
+    /// a melee weapon, else the melee weapon), its reach, and its damage
+    /// to what its traces reach first.
+    fn melee(mut self, world: &mut dyn FireWorld) {
+        if self.ps.pm_flags & PMF_MOUNTED_MELEE != 0 {
+            self.gaps.push(mounted_unknown());
+            return;
+        }
+        let held = self.ps.weapon;
+        let strikes_with_held = weapon_bytes(world, held).is_some_and(|(def, variant)| {
+            WeaponDefView::new(&def, &variant).is_some_and(|d| d.bayonet() || d.use_as_melee())
+        });
+        let weapon = if strikes_with_held {
+            held
+        } else {
+            self.ps.melee_weapon
+        };
+        let Some((def_bytes, variant_bytes)) = weapon_bytes(world, weapon) else {
+            self.gaps.push(crate::movement::weapon_unknown());
+            return;
+        };
+        let Some(def) = WeaponDefView::new(&def_bytes, &variant_bytes) else {
+            self.gaps.push(crate::movement::weapon_unknown());
+            return;
+        };
+        let eye = view_origin(self.ps);
+        let (forward, right, up) = movement_t5::math::angle_vectors(self.ps.viewangles);
+        let range = if def.bayonet() {
+            dvar(world, "player_bayonetRange", 85.0f32)
+        } else {
+            dvar(world, "player_meleeRange", 64.0f32)
+        };
+        let width = dvar(world, "player_meleeWidth", 10.0f32);
+        let height = dvar(world, "player_meleeHeight", 10.0f32);
+        let damage = def.melee_damage();
+        let parms = WeaponParms {
+            forward,
+            right,
+            up,
+            muzzle: eye,
+        };
+        let Some((trace, point)) = self.melee_trace(&parms, damage, range, width, height, world)
+        else {
+            return;
+        };
+        let means = if def.bayonet() {
+            MOD_BAYONET
+        } else {
+            MOD_MELEE
+        };
+        if matches!(trace.hit, BulletHitType::Glass(_)) {
+            self.gaps.push(glass_unknown());
+            return;
+        }
+        let target = hit_id(&trace);
+        let entity = world.entity(target);
+        self.gaps.push(melee_events_unknown());
+        let Some(entity) = entity.filter(|e| e.takes_damage) else {
+            return;
+        };
+        let amount = damage + world.rand() % 5;
+        let dir = [forward[0], forward[1], forward[2] + 0.25];
+        let weapon = self.damage_weapon(world);
         let attacker = self.attacker();
-        if entity.kind == FireEntityKind::Player {
-            self.gaps.push(player_hit_unknown());
-            return;
-        }
-        let attacker_team = world.entity(attacker).and_then(|e| e.team);
-        if entity.kind == FireEntityKind::Actor
-            && dvar_string(world, "g_gametype").as_deref() == Some("vs")
-            && entity.team.is_some()
-            && entity.team == attacker_team
-        {
-            return;
-        }
-        if entity.kind == FireEntityKind::Actor
-            && !entity.ignore_locational_damage
-            && bp.means != MOD_MELEE
-        {
-            let scale = location_multiplier(location, weapon, world);
-            let capped = matches!(entity.ai_type, Some("zombie" | "dog"));
-            let scale = if capped && scale > 1.0 {
-                1.0
-            } else if scale == 0.0 {
-                return;
-            } else {
-                scale
-            };
-            amount = (amount as f32 * scale) as i32;
-            if amount < 1 {
-                amount = 1;
+        self::damage(
+            self.gaps,
+            attacker,
+            attacker,
+            entity,
+            Hit {
+                target,
+                dir,
+                point,
+                amount,
+                flags: 0,
+                means,
+                weapon,
+                location: trace.hit_location,
+                bone: trace.bone,
+            },
+            world,
+        );
+    }
+
+    /// The blow's traces from just behind the eye out to its reach, across
+    /// its width and height: the first that reaches a body, else the
+    /// nearest that hits anything. Damage triggers on the centre line.
+    fn melee_trace(
+        &mut self,
+        parms: &WeaponParms,
+        damage: i32,
+        range: f32,
+        width: f32,
+        height: f32,
+        world: &mut dyn FireWorld,
+    ) -> Option<(BulletTrace, [f32; 3])> {
+        let count = if width > 0.0 || height > 0.0 { 9 } else { 1 };
+        let attacker = self.attacker();
+        let start = mad(parms.muzzle, parms.forward, -10.0);
+        let mut best: Option<(BulletTrace, [f32; 3])> = None;
+        for &(across, along) in &MELEE_OFFSETS[..count] {
+            let mut end = mad(parms.muzzle, parms.forward, range);
+            if count > 1 {
+                end = mad(end, parms.right, across * width);
+                end = mad(end, parms.up, along * height);
+            }
+            let trace = world.bullet_trace(start, end, attacker, MELEE_MASK);
+            let f = trace.fraction;
+            let point = [
+                (end[0] - start[0]) * f + start[0],
+                (end[1] - start[1]) * f + start[1],
+                (end[2] - start[2]) * f + start[2],
+            ];
+            if across == 0.0 && along == 0.0 {
+                world.damage_triggers(attacker, parms.muzzle, point, damage, MEANS[MOD_MELEE]);
+            }
+            if f == 1.0 || trace.surface_flags & surf::NOIMPACT != 0 {
+                continue;
+            }
+            if world.entity(hit_id(&trace)).is_some_and(sentient) {
+                return Some((trace, point));
+            }
+            if best.as_ref().is_none_or(|(b, _)| f <= b.fraction) {
+                best = Some((trace, point));
             }
         }
-        if entity.god {
+        best.filter(|(trace, _)| trace.fraction < 1.0)
+    }
+
+    /// The weapon a player's damage is credited to: the offhand while one
+    /// is thrown, the melee weapon in a blow with a weapon that is neither
+    /// a bayonet nor used as a melee weapon, else the held weapon.
+    fn damage_weapon(&self, world: &dyn FireWorld) -> u32 {
+        use movement_t5::weapon::state;
+        let ps = self.ps;
+        let s = ps.weaponstate;
+        if ps.weap_flags & movement_t5::state::weap_flags::OFFHAND_ACTIVE != 0
+            && state::OFFHAND_INIT < s
+            && s < state::DETONATING
+        {
+            return ps.offhand_index;
+        }
+        if matches!(s, state::MELEE_INIT | state::MELEE_FIRE | state::MELEE_END) {
+            let plain = weapon_bytes(world, ps.weapon).is_some_and(|(def, variant)| {
+                WeaponDefView::new(&def, &variant)
+                    .is_some_and(|d| !d.bayonet() && !d.use_as_melee())
+            });
+            if plain && s != state::MELEE_END {
+                return ps.melee_weapon;
+            }
+        }
+        ps.weapon
+    }
+}
+
+/// The server's damage to what a shot, blow or blast reaches: a player's
+/// own multipliers, an actor's hit location multipliers, then the entity's
+/// damage callback.
+pub(crate) fn damage(
+    gaps: &mut Vec<&'static Unknown>,
+    attacker: i32,
+    inflictor: i32,
+    entity: FireEntity,
+    hit: Hit,
+    world: &mut dyn FireWorld,
+) {
+    let Hit {
+        target,
+        dir,
+        point,
+        mut amount,
+        flags,
+        means,
+        weapon,
+        location,
+        bone,
+    } = hit;
+    if entity.kind == FireEntityKind::Player {
+        if target != attacker
+            && world
+                .entity(attacker)
+                .is_some_and(|e| e.kind == FireEntityKind::Player)
+        {
+            gaps.push(player_hit_unknown());
             return;
+        }
+        let Some(player) = world.player(target) else {
+            return;
+        };
+        let (ps, _) = crate::movement::unpack(&mut player.clone());
+        if ps.other_flags & 1 != 0 || ps.pm_type == movement_t5::state::pm_type::DEAD {
+            return;
+        }
+        if means != MOD_FALLING {
+            let scale = if flags & dflags::RADIUS != 0 {
+                dvar(world, "player_radiusDamageMultiplier", 1.0f32)
+            } else if means == MOD_MELEE {
+                dvar(world, "player_meleeDamageMultiplier", 1.0f32)
+            } else {
+                dvar(world, "player_damageMultiplier", 1.0f32)
+            };
+            amount = (amount as f32 * scale) as i32;
         }
         amount = amount.max(1);
-        if entity.kind == FireEntityKind::Actor && !entity.allow_death && amount >= entity.health {
-            self.gaps.push(delayed_death_unknown());
-        }
-        if flags & dflags::RADIUS == 0 && entity.demigod && entity.health <= amount {
-            amount = entity.health - 1;
-        }
-        if amount == 0 {
-            return;
-        }
-        world.damage(&FireDamage {
-            target,
-            inflictor: attacker,
-            attacker,
-            dir: normalized(bp.dir),
-            point,
-            amount,
-            flags,
-            means: MEANS[bp.means],
-            weapon,
-            hit_location: HIT_LOCATIONS
-                .get(location as usize)
-                .copied()
-                .unwrap_or("none"),
-            bone,
-        });
     }
+    let attacker_team = world.entity(attacker).and_then(|e| e.team);
+    if entity.kind == FireEntityKind::Actor
+        && dvar_string(world, "g_gametype").as_deref() == Some("vs")
+        && entity.team.is_some()
+        && entity.team == attacker_team
+    {
+        return;
+    }
+    if entity.kind == FireEntityKind::Actor
+        && !entity.ignore_locational_damage
+        && means != MOD_MELEE
+    {
+        let scale = location_multiplier(location, weapon, world);
+        let capped = matches!(entity.ai_type, Some("zombie" | "dog"));
+        let scale = if capped && scale > 1.0 {
+            1.0
+        } else if scale == 0.0 {
+            return;
+        } else {
+            scale
+        };
+        amount = (amount as f32 * scale) as i32;
+        if amount < 1 {
+            amount = 1;
+        }
+    }
+    if entity.god {
+        return;
+    }
+    amount = amount.max(1);
+    if entity.kind == FireEntityKind::Actor && !entity.allow_death && amount >= entity.health {
+        gaps.push(delayed_death_unknown());
+    }
+    if flags & dflags::RADIUS == 0 && entity.demigod && entity.health <= amount {
+        amount = entity.health - 1;
+    }
+    if amount == 0 {
+        return;
+    }
+    world.damage(&FireDamage {
+        target,
+        inflictor,
+        attacker,
+        dir: normalized(dir),
+        point,
+        amount,
+        flags,
+        means: MEANS[means],
+        weapon,
+        hit_location: HIT_LOCATIONS
+            .get(location as usize)
+            .copied()
+            .unwrap_or("none"),
+        location,
+        bone,
+    });
+}
+
+/// A means of death's number, by its script name.
+pub(crate) fn means_index(name: &str) -> usize {
+    MEANS.iter().position(|m| *m == name).unwrap_or(0)
+}
+
+/// A player's eye: origin, eye height and lean.
+pub(crate) fn view_origin(ps: &PlayerState) -> [f32; 3] {
+    let mut eye = ps.origin;
+    eye[2] += ps.view_height_current;
+    if ps.leanf != 0.0 {
+        let frac = (2.0 - ps.leanf.abs()) * ps.leanf;
+        let roll = frac * 16.0;
+        let (_, right, _) = movement_t5::math::angle_vectors([0.0, ps.viewangles[1], roll]);
+        eye = mad(eye, right, frac * 20.0);
+    }
+    eye
+}
+
+/// Another player's eye, from its movement state.
+pub(crate) fn player_eye(world: &dyn FireWorld, entity: i32) -> Option<[f32; 3]> {
+    let player = world.player(entity)?;
+    let (ps, _) = crate::movement::unpack(&mut player.clone());
+    Some(view_origin(&ps))
+}
+
+/// A weapon's definition and variant bytes, copied out of the match.
+fn weapon_bytes(world: &dyn FireWorld, weapon: u32) -> Option<(Box<[u8]>, Box<[u8]>)> {
+    world
+        .weapon(weapon)
+        .map(|w| (w.def.clone(), w.variant.clone()))
 }
 
 fn dvar_string(world: &dyn FireWorld, name: &str) -> Option<String> {
     world.dvar(name)
 }
 
-fn sentient(entity: FireEntity) -> bool {
+pub(crate) fn sentient(entity: FireEntity) -> bool {
     matches!(entity.kind, FireEntityKind::Player | FireEntityKind::Actor)
 }
 
@@ -964,7 +1248,7 @@ fn length_zyx(v: [f32; 3]) -> f32 {
 }
 
 /// The entity number a trace hit: the world for glass, none for nothing.
-fn hit_id(trace: &BulletTrace) -> i32 {
+pub(crate) fn hit_id(trace: &BulletTrace) -> i32 {
     match trace.hit {
         BulletHitType::Entity(n) => n,
         BulletHitType::Glass(_) => ENTITY_WORLD,

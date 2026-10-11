@@ -24,6 +24,25 @@ pub(crate) fn player_object(world: &World, client: u32) -> Value {
 }
 
 pub(crate) fn player_damage(world: &mut World, tick: crate::Tick, hit: &crate::script_player::Hit) {
+    player_damage_with(world, tick, hit, true);
+}
+
+/// Damage a game's own rules settled; they decide themselves which blasts
+/// pass players by.
+pub(crate) fn game_player_damage(
+    world: &mut World,
+    tick: crate::Tick,
+    hit: &crate::script_player::Hit,
+) {
+    player_damage_with(world, tick, hit, false);
+}
+
+fn player_damage_with(
+    world: &mut World,
+    tick: crate::Tick,
+    hit: &crate::script_player::Hit,
+    ignore_radius: bool,
+) {
     if crate::script_player::god_mode(&FrameWorld::from_world(world), hit.victim) {
         return;
     }
@@ -33,7 +52,8 @@ pub(crate) fn player_damage(world: &mut World, tick: crate::Tick, hit: &crate::s
     };
     let runtime = world.resource::<RoundScript>();
     if !runtime.entities[&object].accepts_damage(hit.flags)
-        || runtime.engine.players_ignore_radius_damage
+        || ignore_radius
+            && runtime.engine.players_ignore_radius_damage
             && hit.flags & crate::script_player::IDFLAGS_RADIUS != 0
     {
         return;

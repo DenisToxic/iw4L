@@ -151,15 +151,26 @@ impl BotTpQueue {
     }
 }
 
+/// What a queued press asks a bot to do for one command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BotPress {
+    Attack,
+    Melee,
+}
+
 #[derive(Resource, Debug, Default)]
-pub struct BotFireQueue(pub Vec<BotTpTarget>);
+pub struct BotFireQueue(pub Vec<(BotTpTarget, BotPress)>);
 
 impl BotFireQueue {
     pub fn push(&mut self, target: BotTpTarget) {
-        self.0.push(target);
+        self.0.push((target, BotPress::Attack));
     }
 
-    pub fn drain(&mut self) -> Vec<BotTpTarget> {
+    pub fn push_melee(&mut self, target: BotTpTarget) {
+        self.0.push((target, BotPress::Melee));
+    }
+
+    pub fn drain(&mut self) -> Vec<(BotTpTarget, BotPress)> {
         core::mem::take(&mut self.0)
     }
 }

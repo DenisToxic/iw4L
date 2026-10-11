@@ -309,7 +309,7 @@ fn game_state(
     }
 }
 
-fn unpack(player: &mut MovePlayer) -> (PlayerState, UserCmd) {
+pub(crate) fn unpack(player: &mut MovePlayer) -> (PlayerState, UserCmd) {
     let mut ps = PlayerState {
         client_num: player.client_num,
         command_time: player.command_time,
@@ -660,6 +660,22 @@ impl PlayerMovement for T5Movement {
             self.zombies,
             world,
         )
+    }
+
+    fn radius_damage(
+        &self,
+        blast: &game_api::fire::RadiusDamage,
+        world: &mut dyn game_api::fire::FireWorld,
+    ) -> Option<Vec<&'static Unknown>> {
+        Some(crate::radius::radius_damage(blast, world))
+    }
+
+    fn run_missile(
+        &self,
+        missile: &mut game_api::fire::GameMissile,
+        world: &mut dyn game_api::fire::FireWorld,
+    ) -> (game_api::fire::MissileRun, Vec<&'static Unknown>) {
+        crate::missile::run_missile(missile, world)
     }
 
     fn clear_perks(&self, player: &mut MovePlayer) {
