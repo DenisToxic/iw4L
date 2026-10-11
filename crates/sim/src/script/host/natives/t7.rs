@@ -5,6 +5,7 @@
 
 use super::super::args::{arg, byte_string, float, int, kind, optional, string, vector};
 use super::super::arrays::{iteration_key, new_array};
+use super::super::entities::EntityKind;
 use crate::script::{ArrayKey, Namespace, NativeRegistry, RoundScript, Value};
 use bevy_ecs::prelude::{Resource, World};
 use std::collections::BTreeMap;
@@ -39,6 +40,58 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
         runtime.next_object = id.checked_add(1).ok_or("object identifier exhausted")?;
         runtime.objects.insert(id, BTreeMap::new());
         Ok(Value::Object(id))
+    });
+
+    // Entities: "Looks up entities by key and name"; more than one match is
+    // Black Ops 3's error "getent used with more than one entity" (its
+    // executable carries the text). Spawners are not told apart yet.
+    registry.register(Function, "getent", |world, _, args| {
+        super::engine::single(super::engine::matching_entities(world, args)?, "getent")
+    });
+    registry.register(Function, "getentarray", |world, _, args| {
+        let ids: Vec<u64> = if args.iter().all(|a| matches!(a, Value::Undefined)) {
+            world
+                .resource::<RoundScript>()
+                .entities
+                .iter()
+                .filter(|(_, e)| e.kind != EntityKind::HudElem)
+                .map(|(id, _)| *id)
+                .collect()
+        } else {
+            super::engine::matching_entities(world, args)?
+        };
+        new_array(world, ids.into_iter().map(Value::Object).collect())
+    });
+    // "Returns an array of the currently connected players"; [team]
+    // "allies", "axis", "neutral" or "all".
+    registry.register(Function, "getplayers", |world, _, args| {
+        let team = match args.first() {
+            None | Some(Value::Undefined) => None,
+            Some(Value::String(team)) if team.as_bytes() == b"all" => None,
+            Some(Value::String(team)) => Some(team.to_string()),
+            Some(other) => return Err(format!("getplayers: team is {}", kind(other))),
+        };
+        let mut players: Vec<(i32, u64)> = world
+            .resource::<RoundScript>()
+            .entities
+            .iter()
+            .filter(|(_, entity)| entity.kind == EntityKind::Player)
+            .map(|(id, entity)| (entity.number, *id))
+            .collect();
+        players.sort_unstable();
+        let mut listed = Vec::new();
+        for (_, id) in players {
+            let keep = team.as_deref().is_none_or(|team| {
+                match world.resource_mut::<RoundScript>().object_field(id, "team") {
+                    Value::String(own) => own.as_bytes() == team.as_bytes(),
+                    _ => false,
+                }
+            });
+            if keep {
+                listed.push(Value::Object(id));
+            }
+        }
+        new_array(world, listed)
     });
 
     // Arrays: "create an array", "Checks whether this entity/variable is an
