@@ -62,7 +62,7 @@ fn play_sound_with_notify(
             crate::script::runtime::raise(world, receiver.clone(), &old, Vec::new());
         }
     }
-    let at = i64::from(super::super::super::players::now_ms(world)) + UNREPORTED_LENGTH_MS;
+    let at = super::super::super::players::now_ms(world) + UNREPORTED_LENGTH_MS;
     world.resource_mut::<RoundScript>().timed_notifies.push((
         at,
         receiver.clone(),
