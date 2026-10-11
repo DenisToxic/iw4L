@@ -8,6 +8,7 @@ mod cipher;
 mod content;
 mod envelope;
 pub mod light_grid;
+mod path;
 mod salsa20;
 pub mod schema;
 mod script;
@@ -23,6 +24,7 @@ pub use envelope::{
     CHUNKS_OFFSET, Chunk, Chunks, FileHeader, FileHeaderError, MAGIC_ENCRYPTED, MAGIC_SIGNED,
     MAX_XFILE_COUNT, ZONE_NAME_LEN, ZONE_VERSION_PC, parse_file_header,
 };
+pub use path::{PathLink, PathNode};
 pub use script::{
     RawFile, ScriptAsset, ScriptError, StringTable, ZoneScripts, raw_file, scripts, string_table,
 };

@@ -478,7 +478,8 @@ impl<'a> Translator<'a> {
                         let value = u32_at(entry);
                         let target =
                             (entry as isize + 8 + u32_at(entry + 4) as i32 as isize) as usize;
-                        let case = match string_at(entry) {
+                        // A string case keeps its string in the upper half of its value.
+                        let case = match string_at(entry + 2) {
                             Some(text) => Value::String(ScriptString::from(text)),
                             None if value == 0 && position + 1 == count => {
                                 defaulted = true;
@@ -491,7 +492,8 @@ impl<'a> Translator<'a> {
                         };
                         emit!(Op::Load(temp));
                         emit!(Op::Constant(case));
-                        emit!(Op::Binary(Binary::NotEqual));
+                        emit!(Op::Binary(Binary::Case));
+                        emit!(Op::Unary(Unary::Not));
                         fixups.push((out.len(), target));
                         emit!(Op::JumpFalse(0));
                         entry_state.insert(target, (state.depth, state.markers.clone()));
