@@ -240,6 +240,7 @@ const MULTIPLAYER_MODE: ModeRules = ModeRules {
         compass: true,
         script_text: game_api::ScriptText::Engine,
         material_font_floor: true,
+        zombies: false,
         font_scales_sent: None,
     },
 };
@@ -247,6 +248,10 @@ const MULTIPLAYER_MODE: ModeRules = ModeRules {
 const ZCLASSIC_MODE: ModeRules = ModeRules {
     spawn_classnames: Some(&["initial_spawn_points", "info_player_start"]),
     unlimited: Rule::Known(true),
+    hud: HudRules {
+        zombies: true,
+        ..MULTIPLAYER_MODE.hud
+    },
     ..MULTIPLAYER_MODE
 };
 

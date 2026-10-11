@@ -201,6 +201,9 @@ pub struct HudRules {
     pub script_text: ScriptText,
     /// A script material elem grows to the elem's font height.
     pub material_font_floor: bool,
+    /// The mode is zombies: a player's own points, the round, perks and
+    /// power-ups stand where match scores and limits would.
+    pub zombies: bool,
     /// The font scale and from-font scale a client receives for an elem's
     /// scripted ones, when the game's network encodes them.
     pub font_scales_sent: Option<fn(f32, f32) -> (f32, f32)>,
