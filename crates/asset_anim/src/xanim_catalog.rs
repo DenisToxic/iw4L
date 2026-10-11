@@ -130,6 +130,17 @@ impl XAnimCatalog {
         let (_, table) = tables.next()?;
         tables.next().is_none().then(|| Arc::clone(table))
     }
+    /// Every animation state table of a family, by asset name.
+    pub fn state_tables(
+        &self,
+        namespace: AssetNamespace,
+    ) -> impl Iterator<Item = (&str, &Arc<xmodel_runtime::AnimStateTable>)> {
+        self.state_tables
+            .iter()
+            .filter(move |((family, _), _)| *family == namespace)
+            .map(|((_, name), table)| (name.as_str(), table))
+    }
+
     pub fn len(&self) -> usize {
         self.order.len()
     }

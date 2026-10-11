@@ -187,6 +187,11 @@ fn spawn_actor(world: &mut World, receiver: &Value, args: &[Value]) -> Result<Va
         .get_resource_or_insert_with(ActorSpecies::default)
         .0
         .insert(id, species);
+    // The species' read-only fields: dogs are the dog and the zombie dog.
+    let mut runtime = world.resource_mut::<RoundScript>();
+    let is = |yes: bool| Value::Int(yes.into());
+    runtime.set_object_field(id, "isdog", is(species == 0 || species == 3));
+    runtime.set_object_field(id, "isbigdog", is(species == 1));
     let init = format!("{ANIMSCRIPTS}/{}init::main", animscript_prefix(species)?);
     run_now(world, &init, Value::Object(id), Vec::new(), now)
         .map_err(|fault| format!("{init}: {fault:?}"))?;
