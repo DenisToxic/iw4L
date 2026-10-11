@@ -518,6 +518,17 @@ pub fn apply_prepared_match(
                         .iter()
                         .map(|link| (link.node, link.distance, link.negotiation))
                         .collect(),
+                    fields: node
+                        .fields
+                        .as_ref()
+                        .map(|fields| sim::script::NavNodeFields {
+                            type_name: fields.type_name.clone(),
+                            spawnflags: fields.spawnflags,
+                            script_linkname: fields.script_linkname.clone(),
+                            script_noteworthy: fields.script_noteworthy.clone(),
+                            radius: fields.radius,
+                            min_use_dist_sq: fields.min_use_dist_sq,
+                        }),
                 })
                 .collect(),
         ));

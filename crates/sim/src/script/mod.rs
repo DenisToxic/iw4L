@@ -13,7 +13,7 @@ pub use gsc::{Builtin, Catalog, Namespace, Owner};
 pub(crate) use gsc::{Callee, Global, Op};
 pub use gsc::{Fault, Location};
 pub use host::actor_anims::ActorAnimTree;
-pub use host::actor_nav::{ActorPaths, NavNode, NavNodeKind};
+pub use host::actor_nav::{ActorPaths, NavNode, NavNodeFields, NavNodeKind};
 pub(crate) use host::controls::{
     action_slot_command, command_buttons, player_commands, select_location,
 };

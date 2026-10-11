@@ -83,8 +83,16 @@ fn own_zombies(
         ));
     };
     let map = format!("maps/mp/{}", request.map);
+    // The scripts the engine loads itself, then the gametype's and the map's.
     let roots = vec![
+        "codescripts/delete".to_owned(),
+        "codescripts/struct".to_owned(),
         "maps/mp/gametypes_zm/_callbacksetup".to_owned(),
+        "maps/mp/_medals".to_owned(),
+        "maps/mp/gametypes_zm/_rank".to_owned(),
+        "maps/mp/gametypes_zm/_persistence".to_owned(),
+        "maps/mp/gametypes_zm/_spawning".to_owned(),
+        "maps/mp/zombies/_zm".to_owned(),
         format!("maps/mp/gametypes_zm/{}", start.gametype),
         map,
     ];
@@ -123,10 +131,39 @@ fn own_zombies(
         roots,
         entries,
         built: Some(built.program),
-        settings: Vec::new(),
+        settings: gametype_settings(request.config, &start.gametype),
         key_types: Vec::new(),
         dvars,
     })
+}
+
+/// A zombies gametype's settings: `zm/gamesettings_default.cfg`, then the
+/// gametype's own file over it; each line is `gametype_setting <name> <value>`.
+fn gametype_settings<'a>(
+    config: &dyn Fn(&str) -> Option<&'a str>,
+    gametype: &str,
+) -> Vec<(String, String)> {
+    let mut settings: Vec<(String, String)> = Vec::new();
+    for file in ["default", gametype] {
+        let Some(text) = config(&format!("zm/gamesettings_{file}.cfg")) else {
+            continue;
+        };
+        for line in text.lines() {
+            let line = line.split("//").next().unwrap_or("");
+            let mut words = line.split_whitespace();
+            let (Some("gametype_setting"), Some(name), Some(value)) =
+                (words.next(), words.next(), words.next())
+            else {
+                continue;
+            };
+            let name = name.to_ascii_lowercase();
+            match settings.iter_mut().find(|(set, _)| *set == name) {
+                Some((_, set)) => value.clone_into(set),
+                None => settings.push((name, value.to_owned())),
+            }
+        }
+    }
+    settings
 }
 
 /// Black Ops 2's builtins, the first of each name as its loader finds them.

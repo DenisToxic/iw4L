@@ -6,7 +6,7 @@ impl WeaponCatalog {
         let Some(name) = weapon.name().filter(|name| !name.is_empty()) else {
             return;
         };
-        self.entries.push(CatalogWeapon {
+        let entry = CatalogWeapon {
             namespace: self
                 .capture_ns
                 .expect("asset capture requires an explicit family"),
@@ -144,7 +144,16 @@ impl WeaponCatalog {
             combat_slots: CombatFxSlots::default(),
             facts: capture_t6_body_facts(weapon),
             game_bytes: None,
-        });
+        };
+        // A later zone's weapon replaces one of the same name.
+        match self
+            .entries
+            .iter()
+            .position(|known| known.namespace == entry.namespace && known.name == entry.name)
+        {
+            Some(index) => self.entries[index] = entry,
+            None => self.entries.push(entry),
+        }
     }
 }
 

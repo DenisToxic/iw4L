@@ -554,6 +554,16 @@ pub struct WeaponView<'z> {
     def: Option<Ptr>,
 }
 
+impl ZoneLoad {
+    /// Each weapon asset of the zone, as a view when its header is whole.
+    pub fn weapons(&self) -> impl Iterator<Item = Option<WeaponView<'_>>> {
+        self.assets
+            .iter()
+            .filter(|asset| asset.ty == crate::AssetType::Weapon)
+            .map(|asset| WeaponView::new(self, asset))
+    }
+}
+
 impl<'z> WeaponView<'z> {
     pub fn new(load: &'z ZoneLoad, asset: &'z LoadedAsset) -> Option<Self> {
         if asset.ty != crate::AssetType::Weapon || asset.header.len() < variant::SIZE {
