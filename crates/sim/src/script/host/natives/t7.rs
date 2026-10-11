@@ -14,6 +14,15 @@ use std::collections::BTreeMap;
 #[derive(Resource, Default)]
 pub struct GametypeSettings(pub BTreeMap<String, String>);
 
+/// What the scripts set for the match that IW4L does not act on yet: the
+/// scoreboard's columns, match flag bits, the navigation clearance ceiling.
+#[derive(Resource, Default)]
+pub(crate) struct MatchState {
+    pub(crate) scoreboard_columns: Vec<String>,
+    pub(crate) flags: BTreeMap<i32, i32>,
+    pub(crate) clearance_ceiling: Option<f32>,
+}
+
 /// The client fields the scripts registered: pool and name → bits and type.
 #[derive(Resource, Default)]
 pub(crate) struct ClientFields(BTreeMap<(String, String), (i32, String)>);
@@ -272,6 +281,37 @@ pub(crate) fn register(registry: &mut NativeRegistry) {
             },
         );
     }
+
+    // A match IW4L hosts is never split screen and does not rank players
+    // (IW4L's choice: neither builtin is in the reference).
+    registry.register(Function, "issplitscreen", |_, _, _| Ok(Value::Int(0)));
+    registry.register(Function, "gamemodeisusingxp", |_, _, _| Ok(Value::Int(0)));
+    // "Set the scoreboard columns", "Flags a bit in the match state", "Sets a
+    // new clearance ceiling": recorded; nothing reads them yet.
+    registry.register(Function, "setscoreboardcolumns", |world, _, args| {
+        let columns = (0..args.len())
+            .map(|i| string(args, i))
+            .collect::<Result<Vec<_>, _>>()?;
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .scoreboard_columns = columns;
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "setmatchflag", |world, _, args| {
+        let (bit, value) = (int(args, 0)?, int(args, 1)?);
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .flags
+            .insert(bit, value);
+        Ok(Value::Undefined)
+    });
+    registry.register(Function, "setclearanceceiling", |world, _, args| {
+        let ceiling = float(args, 0)?;
+        world
+            .get_resource_or_insert_with(MatchState::default)
+            .clearance_ceiling = Some(ceiling);
+        Ok(Value::Undefined)
+    });
 
     // Client fields: "Register a client field" from a pool ("world",
     // "actor", "vehicle", "scriptmover", …) with 1-32 bits, "int" or "float".

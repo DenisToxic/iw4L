@@ -9,6 +9,9 @@ pub static GAME: T7 = T7;
 
 const ZOMBIES: &str = "zclassic";
 
+/// The module that holds the code callbacks the engine calls.
+const CALLBACKS: &str = "scripts/shared/callbacks_shared";
+
 impl game_api::GameScripts for T7 {
     fn program(
         &self,
@@ -30,9 +33,16 @@ impl game_api::GameScripts for T7 {
         for line in &built.report {
             diag::info!(Sim, "{line}");
         }
+        // Black Ops 3's executable looks up its code callbacks by hash; the
+        // order is read from what the scripts need: the systems registered by
+        // `autoexec` are set up in pre-initialization before the mains use
+        // them, and finalize-initialization runs the post-systems after.
         let mut entries = built.autoexec;
+        entries.push(format!("{CALLBACKS}::codecallback_preinitialization"));
         entries.push(format!("{gametype}::main"));
         entries.push(format!("{map}::main"));
+        entries.push(format!("{CALLBACKS}::codecallback_finalizeinitialization"));
+        entries.push(format!("{CALLBACKS}::codecallback_startgametype"));
         let settings = gametype_settings(request.config, ZOMBIES);
         diag::info!(
             Sim,
