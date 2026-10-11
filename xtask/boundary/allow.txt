@@ -1030,7 +1030,7 @@ pattern crates/ui/src/frontend/rules.rs .token()=="…" 1
 pattern crates/ui/src/launcher.rs "<game>" 3
 pattern crates/ui/src/launcher.rs "<gametype>" 2
 pattern crates/ui/src/t6_art.rs AssetNamespace::<game> 5
-pattern crates/ui/src/t6_hud.rs AssetNamespace::<game> 5
+pattern crates/ui/src/t6_hud.rs AssetNamespace::<game> 4
 pattern crates/ui/src/t6_hud.rs entity_iw4:: 2
 pattern crates/ui/src/t6_hud.rs hud_iw4:: 1
 pattern crates/ui/src/t6_hud.rs playerstate_iw4:: 3
