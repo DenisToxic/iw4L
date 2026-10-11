@@ -178,11 +178,71 @@ impl game_api::GameMenus for T5 {
     }
 
     fn layout(&self) -> Rule<&'static dyn game_api::MenuLayout> {
-        Rule::Unknown(unknown!(
-            "t5.hud.menu_layout",
-            "how Black Ops' menu engine places an item and scales its text",
-            "Black Ops' menu engine rules: text origin, text scale, screen placement"
-        ))
+        Rule::Known(&MenuLayout)
+    }
+}
+
+/// Black Ops' menu engine placement and text measures, read from its
+/// executable. Its menus have no scale transition (no `lerp` menu command),
+/// so a menu's scale never changes an item.
+struct MenuLayout;
+
+/// Black Ops rounds a measured text size to the nearest whole pixel, halves up.
+fn round_half_up(value: f32) -> f32 {
+    (value + 0.5).floor()
+}
+
+impl game_api::MenuLayout for MenuLayout {
+    /// `text_scale` × 48 over the font's pixel height, worked in double
+    /// precision and stored as a float.
+    fn text_scale(&self, pixel_height: i32, text_scale: f32) -> f32 {
+        (f64::from(text_scale) * 48.0 / f64::from(pixel_height)) as f32
+    }
+
+    fn text_height(&self, pixel_height: i32, text_scale: f32) -> f32 {
+        round_half_up(pixel_height as f32 * self.text_scale(pixel_height, text_scale))
+    }
+
+    fn text_width(&self, glyph_width: i32, pixel_height: i32, text_scale: f32) -> f32 {
+        round_half_up(glyph_width as f32 * self.text_scale(pixel_height, text_scale))
+    }
+
+    /// Left (0), centred (1) or right (2) in the rect's width, and on top
+    /// (0), below the text's height (4), centred (8) or at the bottom (12)
+    /// of its height, after the item's text offset.
+    fn text_origin(
+        &self,
+        [x, y, w, h]: [f32; 4],
+        align_mode: i32,
+        align_x: f32,
+        align_y: f32,
+        measured_w: f32,
+        measured_h: f32,
+    ) -> (f32, f32) {
+        let mut offset_x = align_x;
+        let horizontal = align_mode & 3;
+        if horizontal != 0 {
+            let mut room = w - measured_w;
+            if horizontal == 1 {
+                room *= 0.5;
+            }
+            offset_x = room + align_x;
+        }
+        let offset_y = match align_mode & 0xc {
+            0 => align_y,
+            4 => measured_h + align_y,
+            8 => (h + measured_h) * 0.5 + align_y,
+            _ => h + align_y,
+        };
+        (x + offset_x, y + offset_y)
+    }
+
+    fn text_paint_scale(&self, text_scale: f32, _menu_scale: f32) -> f32 {
+        text_scale
+    }
+
+    fn window_rect(&self, rect: [f32; 4], _menu_scale: f32) -> [f32; 4] {
+        rect
     }
 }
 
