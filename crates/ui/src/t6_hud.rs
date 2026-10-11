@@ -2,6 +2,10 @@ use asset_core::AssetNamespace;
 use assets::{PreparedLocalizedStrings, PreparedWeapons, SessionMapIdentity};
 use bevy::prelude::*;
 use frame::{AppScreen, ClientSet};
+use hud_iw4::{
+    HE_TYPE_MATERIAL, ScreenPlacement, copy_in_use_prefix, hud_elem_placement, lerp_hud_colors,
+    replace_directive,
+};
 use net::{ClientActionInput, FrameClock, LocalPresentClient, PresentedSnapshot};
 use sim::{ClientId, ClientLifecycle, MatchPhase, Snapshot};
 use std::collections::VecDeque;
@@ -25,7 +29,6 @@ enum HudArt {
     Damage,
     Perk(u8),
     Powerup(u8),
-    Tool,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -53,7 +56,14 @@ pub(crate) fn register(app: &mut App) {
         .add_observer(obituary)
         .add_systems(
             Update,
-            (spawn, refresh, refresh_graphics, refresh_art)
+            (
+                spawn,
+                refresh,
+                refresh_graphics,
+                refresh_art,
+                fit_viewport,
+                refresh_script_materials,
+            )
                 .chain()
                 .in_set(ClientSet::Ui)
                 .in_set(super::t6_text::NativeUiPaint),
@@ -105,7 +115,11 @@ fn spawn(mut commands: Commands, font: Res<GameUiFont>, existing: Query<Entity, 
             super::t6_text::NativeUiRoot(true),
             UiLayer::Hud,
             Visibility::Hidden,
+            UiTransform::default(),
             Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
                 display: Display::None,
@@ -129,14 +143,6 @@ fn spawn(mut commands: Commands, font: Res<GameUiFont>, existing: Query<Entity, 
                     Val::Px(104.0),
                     Val::Px(82.0),
                     Val::Px(70.0),
-                ),
-                (
-                    HudArt::Tool,
-                    Val::Px(182.0),
-                    Val::Auto,
-                    Val::Px(39.0),
-                    Val::Px(30.0),
-                    Val::Px(30.0),
                 ),
                 (
                     HudArt::Damage,
@@ -349,6 +355,144 @@ fn spawn(mut commands: Commands, font: Res<GameUiFont>, existing: Query<Entity, 
         });
 }
 
+fn fit_viewport(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut roots: Query<(&mut Node, &mut UiTransform), With<T6HudRoot>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let scale = window.height() / 720.0;
+    if !scale.is_finite() || scale <= 0.0 {
+        return;
+    }
+    let width = window.width() / scale;
+    for (mut node, mut transform) in &mut roots {
+        if node.width != Val::Px(width) || node.height != Val::Px(720.0) {
+            node.width = Val::Px(width);
+            node.height = Val::Px(720.0);
+        }
+        transform.set_if_neq(UiTransform {
+            scale: Vec2::splat(scale),
+            translation: Val2::px(width * (scale - 1.0) * 0.5, 720.0 * (scale - 1.0) * 0.5),
+            ..default()
+        });
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn refresh_script_materials(
+    mut commands: Commands,
+    map: Option<Res<SessionMapIdentity>>,
+    roots: Query<(Entity, &Node), With<T6HudRoot>>,
+    presented: Res<PresentedSnapshot>,
+    local: Res<LocalPresentClient>,
+    clock: Option<Res<FrameClock>>,
+    menu: Res<frame::NativeGameMenu>,
+    mut art: ResMut<crate::t6_art::T6Art>,
+    mut images: ResMut<Assets<Image>>,
+    mut slots: Local<Vec<Entity>>,
+    mut sprites: Query<(&mut ImageNode, &mut Node, &mut ZIndex), Without<T6HudRoot>>,
+) {
+    let root = roots.single().ok().and_then(|(entity, node)| {
+        if let Val::Px(width) = node.width {
+            Some((entity, width))
+        } else {
+            None
+        }
+    });
+    let snapshot = presented.snapshot();
+    let meta = snapshot.and_then(|snapshot| snapshot.meta.for_client(local.0));
+    let t6 = map.is_some_and(|map| map.namespace == Some(AssetNamespace::T6));
+    let (Some((root, width)), Some(snapshot), Some(meta), true) = (root, snapshot, meta, t6) else {
+        for &entity in slots.iter() {
+            if let Ok((_, mut node, _)) = sprites.get_mut(entity)
+                && node.display != Display::None
+            {
+                node.display = Display::None;
+            }
+        }
+        return;
+    };
+    let placement = ScreenPlacement::setup(
+        0.0, 0.0, width, 720.0, width, 720.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+    );
+    let time = clock.map_or(0, |clock| clock.time());
+    let mut index = 0;
+    let mut elements = copy_in_use_prefix(&meta.hud_current)
+        .iter()
+        .chain(copy_in_use_prefix(&meta.hud_archival).iter())
+        .collect::<Vec<_>>();
+    elements.sort_by(|a, b| a.sort.total_cmp(&b.sort));
+    for elem in elements {
+        if elem.elem_type != HE_TYPE_MATERIAL
+            || (elem.flags & 2 != 0 && meta.lifecycle != ClientLifecycle::Alive)
+            || (elem.flags & 4 != 0 && menu.0)
+        {
+            continue;
+        }
+        let Some(name) = u8::try_from(elem.material_index)
+            .ok()
+            .and_then(|index| sim::name_in_occupied(&snapshot.meta.hud_materials, index))
+        else {
+            continue;
+        };
+        let Some(image) = art.image(name, &mut images) else {
+            continue;
+        };
+        let color = lerp_hud_colors(elem, time);
+        let rect = hud_elem_placement(&placement, elem, time, 0.0, 0.0);
+        let view = ImageNode {
+            image,
+            color: Color::srgba(
+                color[0] as f32 / 255.0,
+                color[1] as f32 / 255.0,
+                color[2] as f32 / 255.0,
+                color[3] as f32 / 255.0,
+            ),
+            ..default()
+        };
+        let node = Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(rect.x),
+            top: Val::Px(rect.y),
+            width: Val::Px(rect.w),
+            height: Val::Px(rect.h),
+            ..default()
+        };
+        let z = ZIndex(if elem.flags & 1 != 0 {
+            index as i32 + 1
+        } else {
+            index as i32 - 64
+        });
+        if let Some(&entity) = slots.get(index) {
+            if let Ok((mut current_view, mut current_node, mut current_z)) = sprites.get_mut(entity)
+            {
+                if current_view.image != view.image {
+                    current_view.image = view.image;
+                }
+                if current_view.color != view.color {
+                    current_view.color = view.color;
+                }
+                current_node.set_if_neq(node);
+                current_z.set_if_neq(z);
+            }
+        } else {
+            let entity = commands.spawn((view, node, z)).id();
+            commands.entity(root).add_child(entity);
+            slots.push(entity);
+        }
+        index += 1;
+    }
+    for &entity in slots.iter().skip(index) {
+        if let Ok((_, mut node, _)) = sprites.get_mut(entity)
+            && node.display != Display::None
+        {
+            node.display = Display::None;
+        }
+    }
+}
+
 fn player_name(snapshot: &Snapshot, id: ClientId) -> String {
     snapshot.meta.for_client(id).map_or_else(
         || format!("Player {}", id.0),
@@ -378,6 +522,7 @@ fn refresh(
     weapons: Option<Res<PreparedWeapons>>,
     strings: Option<Res<PreparedLocalizedStrings>>,
     actions: Option<Res<ClientActionInput>>,
+    input: Res<frame::HudInputView>,
     generation: Option<Res<frame::WorldGeneration>>,
     clock: Option<Res<FrameClock>>,
     mode: Option<Res<game_api::ModeRules>>,
@@ -417,6 +562,9 @@ fn refresh(
     if !visible {
         return;
     }
+    let Some(namespace) = map.as_ref().and_then(|map| map.namespace) else {
+        return;
+    };
     let Some(snapshot) = presented.snapshot() else {
         return;
     };
@@ -439,7 +587,7 @@ fn refresh(
     let name = registry.as_ref().map_or_else(String::new, |registry| {
         registry
             .display_name_key_of(weapon)
-            .and_then(|key| strings.as_ref()?.0.text_in(AssetNamespace::T6, key))
+            .and_then(|key| strings.as_ref()?.0.text_in(namespace, key))
             .unwrap_or_else(|| registry.name_of(weapon))
             .to_owned()
     });
@@ -564,7 +712,7 @@ fn refresh(
                         && let Some(key) = registry.display_name_key_of(index)
                         && let Some(label) = strings
                             .as_ref()
-                            .and_then(|strings| strings.0.text_in(AssetNamespace::T6, key))
+                            .and_then(|strings| strings.0.text_in(namespace, key))
                     {
                         message.replacen(raw_name, label, 1)
                     } else {
@@ -575,6 +723,89 @@ fn refresh(
                         .strip_prefix("ROUND ")
                         .unwrap_or(&message)
                         .to_owned()
+                }
+            }
+            Field::Use if alive && !scores => {
+                let bind = input.use_key.as_deref().unwrap_or("");
+                if (1..=4).contains(&ps.cursor_hint) {
+                    sim::hud_string_in_occupied(&snapshot.meta.hud_strings, ps.cursor_hint_string)
+                        .and_then(|raw| {
+                            if let Some(plain) = raw.strip_prefix(sim::HUD_STRING_PLAIN) {
+                                return Some(plain.to_owned());
+                            }
+                            let mut parts = raw.split(sim::HUD_PRINT_ARG_SEPARATOR);
+                            let mut text = strings
+                                .as_ref()?
+                                .0
+                                .text_in(namespace, parts.next()?)?
+                                .to_owned();
+                            for (index, value) in parts.enumerate() {
+                                text = text.replace(&format!("&&{}", index + 1), value);
+                            }
+                            Some(text)
+                        })
+                        .map(|text| {
+                            replace_directive(&text, |command| {
+                                if matches!(command, "+activate" | "+usereload") {
+                                    bind.to_owned()
+                                } else {
+                                    String::new()
+                                }
+                            })
+                            .replace("&&1", bind)
+                        })
+                        .unwrap_or(String::new())
+                } else if ps.cursor_hint > 4 {
+                    registry
+                        .as_ref()
+                        .and_then(|registry| {
+                            let index = (ps.cursor_hint - 4) as u32;
+                            let key = registry.display_name_key_of(index)?;
+                            let strings = strings.as_ref()?;
+                            let name = strings.0.text_in(namespace, key)?;
+                            let weapons = weapons.as_ref()?;
+                            let primary_count = ps
+                                .weapons
+                                .iter()
+                                .filter(|&&w| {
+                                    w > 0
+                                        && weapons
+                                            .snapshot_weapon(presented.weapon_epoch(), w as u32)
+                                            .ok()
+                                            .and_then(|weapon| weapon.hud_facts())
+                                            .is_some_and(|facts| facts.is_primary())
+                                })
+                                .count();
+                            let offhand = weapons
+                                .snapshot_weapon(presented.weapon_epoch(), index)
+                                .ok()
+                                .and_then(|weapon| weapon.hud_facts())
+                                .is_some_and(|facts| facts.offhand_class != 0);
+                            let template = strings.0.text_in(
+                                namespace,
+                                if offhand || primary_count < 2 {
+                                    "PLATFORM_PICKUPNEWWEAPON"
+                                } else {
+                                    "PLATFORM_SWAPWEAPONS"
+                                },
+                            )?;
+                            let template = replace_directive(template, |command| {
+                                if matches!(command, "+activate" | "+usereload") {
+                                    bind.to_owned()
+                                } else {
+                                    String::new()
+                                }
+                            })
+                            .replace("&&1", bind);
+                            Some(if template.contains("&&2") {
+                                template.replace("&&2", name)
+                            } else {
+                                format!("{template} {name}")
+                            })
+                        })
+                        .unwrap_or(String::new())
+                } else {
+                    String::new()
                 }
             }
             Field::Weapon if alive && !scores => name.clone(),
@@ -672,23 +903,6 @@ fn refresh_art(
         .filter_map(|elem| sim::hud_string_in_occupied(&snapshot.meta.hud_strings, elem.text))
         .filter_map(|raw| raw.strip_prefix(sim::HUD_STRING_PLAIN))
         .collect();
-    let tool = meta
-        .hud_archival
-        .iter()
-        .chain(&meta.hud_current)
-        .filter(|elem| elem.elem_type == hud_iw4::HE_TYPE_MATERIAL)
-        .filter_map(|elem| {
-            sim::name_in_occupied(
-                &snapshot.meta.hud_materials,
-                u8::try_from(elem.material_index).ok()?,
-            )
-        })
-        .find(|name| {
-            matches!(
-                *name,
-                "zom_hud_craftable_tank_shovel" | "zom_hud_shovel_gold"
-            )
-        });
     let round = labels
         .iter()
         .find_map(|label| label.strip_prefix("ROUND ")?.parse::<u32>().ok());
@@ -725,7 +939,6 @@ fn refresh_art(
     for (kind, mut view, mut node) in &mut sprites {
         let image = match kind {
             HudArt::Round if zombies => tally.clone(),
-            HudArt::Tool if zombies => tool.and_then(|name| art.image(name, &mut images)),
             HudArt::Score => art.image(
                 if zombies {
                     "scorebar_zom_1"
