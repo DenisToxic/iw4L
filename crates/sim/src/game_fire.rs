@@ -20,7 +20,6 @@ pub(crate) struct MatchFireWorld<'w, 'a> {
     world: &'w mut FrameWorld<'a>,
     content: Arc<SimContent>,
     tick: Tick,
-    attacker: ClientId,
     query: LagcompQuery,
     shot: ShotId,
     segment: u16,
@@ -38,7 +37,6 @@ impl<'w, 'a> MatchFireWorld<'w, 'a> {
             content: world.content(),
             world,
             tick,
-            attacker,
             query,
             shot,
             segment: 0,
@@ -162,6 +160,12 @@ impl FireWorld for MatchFireWorld<'_, '_> {
             .dvars
             .get(name)
             .cloned()
+    }
+
+    fn rand(&mut self) -> i32 {
+        let state = self.world.stuck_holdrand_mut();
+        *state = state.wrapping_mul(0x0003_43fd).wrapping_add(0x0026_9ec3);
+        (*state >> 17) as i32
     }
 
     fn weapon(&self, weapon: u32) -> Option<&GameWeapon> {
