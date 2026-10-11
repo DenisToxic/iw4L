@@ -525,12 +525,26 @@ pub(crate) fn give_weapon(
     akimbo: bool,
 ) -> Result<(), String> {
     living(world, id)?;
-    if world.weapon_is_melee_only(weapon) {
+    let game_rules = crate::game_move::game_weapons(world);
+    if world.weapon_is_melee_only(weapon) && !game_rules {
         return Ok(());
     }
-    let facts = world
-        .combat_facts_for(weapon)
-        .ok_or_else(|| format!("weapon {} has no combat data", weapon_name(world, weapon)))?;
+    let Some(facts) = world.combat_facts_for(weapon) else {
+        // The game's own rules hold a weapon by its definition; a melee
+        // weapon takes a slot and becomes the melee weapon.
+        if game_rules && world.content().game_weapon(weapon).is_some() {
+            let ps = world.player_mut(id).expect("checked above");
+            inventory_add_weapon(ps, weapon, false);
+            if !ps.weapons.contains(&(weapon as i32)) {
+                return Err("the player's inventory is full".into());
+            }
+            return Ok(());
+        }
+        return Err(format!(
+            "weapon {} has no combat data",
+            weapon_name(world, weapon)
+        ));
+    };
     let akimbo =
         akimbo || facts.dual_wield || gsc_give_weapon_is_akimbo(world.weapon_script_name(weapon));
     let offhand = world

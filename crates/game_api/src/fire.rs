@@ -113,6 +113,10 @@ pub trait FireWorld {
     /// A dvar's value; `None` when the match does not keep it.
     fn dvar(&self, name: &str) -> Option<String>;
 
+    /// The server's shared random draw, 0 to 32767: the C library's
+    /// generator over the match's state.
+    fn rand(&mut self) -> i32;
+
     fn weapon(&self, weapon: u32) -> Option<&GameWeapon>;
 
     /// Traces a bullet from `start` to `end`, passing through `pass_entity`.

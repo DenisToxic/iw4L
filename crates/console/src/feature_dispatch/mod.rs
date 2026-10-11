@@ -65,9 +65,13 @@ pub(crate) fn route_debug_feature_commands(
         match cmd.name.as_str() {
             "bot" => match parse_bot_args(&cmd.args) {
                 Err(msg) => echo(msg, console, line),
-                Ok(BotVerb::Hold(_) | BotVerb::Tp(_) | BotVerb::Fire(_) | BotVerb::Give { .. })
-                    if authority.as_ref().is_some_and(|a| !a.0.cheats_enabled()) =>
-                {
+                Ok(
+                    BotVerb::Hold(_)
+                    | BotVerb::Tp(_)
+                    | BotVerb::Fire(_)
+                    | BotVerb::Melee(_)
+                    | BotVerb::Give { .. },
+                ) if authority.as_ref().is_some_and(|a| !a.0.cheats_enabled()) => {
                     echo("bot: cheats are off".into(), console, line);
                 }
                 Ok(BotVerb::Add(n)) => {
@@ -93,6 +97,10 @@ pub(crate) fn route_debug_feature_commands(
                 Ok(BotVerb::Fire(target)) => {
                     bot_fire.push(target);
                     echo("bot: queued fire".into(), console, line);
+                }
+                Ok(BotVerb::Melee(target)) => {
+                    bot_fire.push_melee(target);
+                    echo("bot: queued melee".into(), console, line);
                 }
                 Ok(BotVerb::Give {
                     id,
@@ -294,7 +302,7 @@ pub fn register_feature_commands(registry: &mut crate::ConsoleRegistry, maps: &[
         ),
         (
             "bot",
-            "bot add [N] | dummy [N] | hold [on|off] | give <id> <weapon> [att...] [camo=<name>] | fire [all|<id>] | tp all|<id> above <h> | tp all|<id> <x> <y> <z>",
+            "bot add [N] | dummy [N] | hold [on|off] | give <id> <weapon> [att...] [camo=<name>] | fire [all|<id>] | melee [all|<id>] | tp all|<id> above <h> | tp all|<id> <x> <y> <z>",
         ),
         (
             "menu",
@@ -329,6 +337,7 @@ pub(crate) enum BotVerb {
         attachments: Vec<String>,
     },
     Fire(BotTpTarget),
+    Melee(BotTpTarget),
     Tp(BotTpRequest),
 }
 
@@ -377,15 +386,20 @@ pub(crate) fn parse_bot_args(args: &[String]) -> Result<BotVerb, String> {
                 attachments: args[3..].to_vec(),
             })
         }
-        "fire" => match args.get(1).map(String::as_str) {
-            None | Some("all") => Ok(BotVerb::Fire(BotTpTarget::All)),
-            Some(s) => {
-                let id = s
-                    .parse::<u32>()
-                    .map_err(|_| "usage: bot fire [all|<id>]".to_owned())?;
-                Ok(BotVerb::Fire(BotTpTarget::Id(ClientId(id))))
-            }
-        },
+        "fire" | "melee" => {
+            let target = match args.get(1).map(String::as_str) {
+                None | Some("all") => BotTpTarget::All,
+                Some(s) => BotTpTarget::Id(ClientId(
+                    s.parse::<u32>()
+                        .map_err(|_| format!("usage: bot {sub} [all|<id>]"))?,
+                )),
+            };
+            Ok(if sub == "fire" {
+                BotVerb::Fire(target)
+            } else {
+                BotVerb::Melee(target)
+            })
+        }
         "tp" => parse_bot_tp(&args[1..]),
         _ => Err(BOT_USAGE.into()),
     }

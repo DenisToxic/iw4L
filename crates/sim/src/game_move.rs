@@ -22,6 +22,12 @@ pub(crate) fn rules(world: &FrameWorld) -> Option<&'static dyn PlayerMovement> {
     }
 }
 
+/// The match runs the game's own weapon rules.
+pub(crate) fn game_weapons(world: &FrameWorld) -> bool {
+    world.bootstrap_ref().mode.map(|mode| mode.weapons)
+        == Some(game_api::Rule::Known(game_api::WeaponRules::Game))
+}
+
 fn frozen(world: &FrameWorld, id: ClientId) -> bool {
     world.client_meta(id).is_some_and(|m| m.controls.frozen)
 }
